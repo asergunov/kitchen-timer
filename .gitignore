@@ -6,3 +6,5 @@
 /venv/
 /trash/
 __pycache__/
+compile_commands.json
+.cache/
