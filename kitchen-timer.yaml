@@ -15,27 +15,31 @@ esphome:
   #   - kitchen-timer.h
   platformio_options:
     board_build.f_cpu: 80000000L
-  #   lib_ldf_mode: "chain+"
+    lib_ldf_mode: "chain+"
 
   # on_boot: 
+  #   priority: 1000.0
   #   then:
   #     - lambda: |
-  #         esp_pm_config_esp32c3_t configure = { .max_freq_mhz = 80, .min_freq_mhz = 10, .light_sleep_enable = true };
+  #         esp_pm_config_esp32c3_t configure = { 
+  #           .max_freq_mhz = 80, // 160, 
+  #           .min_freq_mhz = 80, 
+  #           .light_sleep_enable = false 
+  #         };
   #         ESP_ERROR_CHECK(esp_pm_configure(&configure));
 
 esp32:
   board: esp32-c3-devkitm-1
-  # framework:
-  #   type: arduino
-  # variant: ESP32C3
   framework:
-    type: esp-idf
-    version: recommended
-    sdkconfig_options:
-      # COMPILER_OPTIMIZATION_SIZE: y
-      CONFIG_COMPILER_OPTIMIZATION_PERF: y
-      # CONFIG_PM_ENABLE: y
-      # CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
+    type: arduino
+  # framework:
+  #   type: esp-idf
+  #   version: recommended
+  #   sdkconfig_options:
+  #     # COMPILER_OPTIMIZATION_SIZE: y
+  #     CONFIG_COMPILER_OPTIMIZATION_PERF: y
+  #     CONFIG_PM_ENABLE: y
+  #     CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
 
 # Enable logging
 logger:
@@ -78,6 +82,13 @@ wifi:
 
 web_server:
   port: 80
+
+# lcd_menu:
+#   items:  
+#     - type: label
+#       text: 'Label'
+#     - type: back
+#       text: 'Back'
 
 time:
   - platform: sntp
@@ -132,6 +143,17 @@ i2c:
   - sda: 2
     scl: 0
 
+script:
+  - id: rotary_click
+    mode: queued
+    then: 
+      - output.set_level:
+          id: rtttl_out
+          level: "100%"
+      - output.turn_on: rtttl_out
+      - delay: 1ms
+      - output.turn_off: rtttl_out
+      - delay: 1ms
 sensor:
   - platform: rotary_encoder
     id: encoder
@@ -142,17 +164,10 @@ sensor:
     pin_b: 
       inverted: True
       number: 20
-    on_value: 
+    on_value:
       then:
-        - output.turn_on: buzzer
-        - output.set_level:
-            id: buzzer
-            level: "10%"
-        - output.ledc.set_frequency:
-            id: buzzer
-            frequency: "100Hz"
-        - delay: 1ms
-        - output.turn_off: buzzer
+        - script.execute: rotary_click
+
   - platform: veml7700
     id: light_sensor
     address: 0x10
