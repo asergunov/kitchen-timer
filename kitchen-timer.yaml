@@ -16,6 +16,17 @@ esphome:
   platformio_options:
     board_build.f_cpu: 80000000L
     lib_ldf_mode: "chain+"
+  # on_boot: 
+  #   then:
+  #     - deep_sleep.prevent: deep_sleep_component
+
+globals:
+  - id: menu_active
+    type: bool
+    initial_value: "false"
+  - id: enable_sleeping
+    type: bool
+    initial_value: "false"
 
   # on_boot: 
   #   priority: 1000.0
@@ -66,12 +77,20 @@ ota:
       - lambda: |
           id(tm1637_display).printf("%2.1f%", x);
 
+# deep_sleep:
+#   id: deep_sleep_component
+#   run_duration: 100ms
+#   sleep_duration: 400ms
+
 wifi:
+  id: wifi_component
+  power_save_mode: HIGH
+  fast_connect: True
   networks:
     - ssid: !secret wifi_ssid
       password: !secret wifi_password
-    - ssid: !secret parents.wifi_ssid
-      password: !secret parents.wifi_password
+    # - ssid: !secret parents.wifi_ssid
+    #   password: !secret parents.wifi_password
 
 #   # Enable fallback hotspot (captive portal) in case wifi connection fails
 #   ap:
@@ -154,6 +173,12 @@ script:
       - delay: 1ms
       - output.turn_off: rtttl_out
       - delay: 1ms
+
+# deep_sleep:
+#   sleep_duration: 400ms
+#   run_duration: 100ms
+
+
 sensor:
   - platform: rotary_encoder
     id: encoder
@@ -166,6 +191,21 @@ sensor:
       number: 20
     on_value:
       then:
+        - lambda: |
+            if(id(menu_active)) {
+              id(enable_sleeping) = !id(enable_sleeping);
+              if(enable_sleeping) {
+              //   id(wifi_component).disable();
+                //id(deep_sleep_component).allow_deep_sleep();
+              } else {
+              //   id(wifi_component).enable();
+              //   id(wifi_component).retry_connect();
+                //id(deep_sleep_component).prevent_deep_sleep();
+              }
+
+              
+              id(tm1637_display).update();
+            }
         - script.execute: rotary_click
 
   - platform: veml7700
@@ -277,10 +317,16 @@ sensor:
 
 binary_sensor:
   - platform: gpio
+    id: encoder_button
     name: Button
     pin: 
       number: 10
       inverted: True
+    on_click: 
+      then:
+        - lambda: |
+            id(menu_active) = !id(menu_active);
+            id(tm1637_display).update();
   - platform: gpio
     name: Charging
     pin: 
@@ -376,10 +422,23 @@ display:
     update_interval: 500ms
     intensity: 7
     lambda: |-
+      if(id(menu_active)) {
+        it.print(0, id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
+        return;
+      }
       static int i = 0;
       i++;
       if ((i % 2) == 0)
         it.strftime("%H.%M", id(sntp_time).now());
       else
         it.strftime("%H%M", id(sntp_time).now());
+
+      if(id(enable_sleeping)) {
+        for(const auto& gpio: std::initializer_list<gpio_num_t>{ GPIO_NUM_10, GPIO_NUM_21, GPIO_NUM_20 }) {
+          ESP_ERROR_CHECK(gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL));
+        }
+        ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(500*1000*1000));
+        ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
+        ESP_ERROR_CHECK(esp_light_sleep_start());
+      }
 
