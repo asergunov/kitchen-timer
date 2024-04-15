@@ -1,0 +1,370 @@
+
+# external_components:
+#   - source: "github://asergunov/esphome_esphome@i2s_pdm"
+#     components:
+#       - i2s_audio
+#       - i2s_audio/speaker
+#     refresh: 0s
+
+esphome:
+  name: kitchen-timer
+  friendly_name: kitchen_timer
+  # libraries:
+  #   - esp_pm
+  # includes: 
+  #   - kitchen-timer.h
+  platformio_options:
+    board_build.f_cpu: 80000000L
+  #   lib_ldf_mode: "chain+"
+
+  # on_boot: 
+  #   then:
+  #     - lambda: |
+  #         esp_pm_config_esp32c3_t configure = { .max_freq_mhz = 80, .min_freq_mhz = 10, .light_sleep_enable = true };
+  #         ESP_ERROR_CHECK(esp_pm_configure(&configure));
+
+esp32:
+  board: esp32-c3-devkitm-1
+  # framework:
+  #   type: arduino
+  # variant: ESP32C3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # COMPILER_OPTIMIZATION_SIZE: y
+      CONFIG_COMPILER_OPTIMIZATION_PERF: y
+      # CONFIG_PM_ENABLE: y
+      # CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
+
+# Enable logging
+logger:
+  level: WARN
+
+# debug:
+#   update_interval: 10s
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret kitchen_timer.api.encryption
+
+ota:
+  password: !secret kitchen_timer.ota.password
+  on_begin: 
+    then:
+      - switch.turn_off: power_saving
+  on_error: 
+    then:
+      - switch.turn_on: power_saving
+  on_progress: 
+    then:
+      - lambda: |
+          id(tm1637_display).printf("%2.1f%", x);
+
+wifi:
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+    - ssid: !secret parents.wifi_ssid
+      password: !secret parents.wifi_password
+
+#   # Enable fallback hotspot (captive portal) in case wifi connection fails
+#   ap:
+#     ssid: "Kitchen-Timer Fallback Hotspot"
+#     password: "yOuGK5OiGnhg"
+
+# captive_portal:
+
+web_server:
+  port: 80
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+switch:
+  - platform: gpio
+    id: power_saving
+    restore_mode: ALWAYS_ON
+    name: Power Saving
+    pin: 
+      number: 6
+      inverted: True
+  - platform: template
+    optimistic: True
+    name: Flip display
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on: 
+      then:
+        - lambda: |
+            id(tm1637_display).set_inverted(true);
+    on_turn_off: 
+      then:
+        - lambda: |
+            id(tm1637_display).set_inverted(false);
+  - platform: template
+    name: Auto Brightness
+    id: auto_brightness_switch
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_ON
+
+
+output:
+  - platform: ledc
+    ######################################################
+    # One buzzer leg connected to GPIO12, the other to GND
+    ######################################################
+    pin: 9
+    id: buzzer
+  - platform: ledc
+    id: rtttl_out
+    pin: 5
+    
+
+rtttl:
+  output: rtttl_out
+  id: my_rtttl
+  gain: 50%
+
+
+i2c:
+  - sda: 2
+    scl: 0
+
+sensor:
+  - platform: rotary_encoder
+    id: encoder
+    name: Encoder
+    pin_a: 
+      inverted: True
+      number: 21
+    pin_b: 
+      inverted: True
+      number: 20
+    on_value: 
+      then:
+        - output.turn_on: buzzer
+        - output.set_level:
+            id: buzzer
+            level: "10%"
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "100Hz"
+        - delay: 1ms
+        - output.turn_off: buzzer
+  - platform: veml7700
+    id: light_sensor
+    address: 0x10
+    update_interval: 0.1s
+
+    # short variant of sensor definition:
+    ambient_light:
+      id: ambient_light_sensor_fast
+      name: Ambient Light Sensor Fast
+      internal: True
+    
+    infrared:
+      name: Infrared light
+      filters:
+        - throttle: 5s
+    full_spectrum:
+      name: Full spectrum light
+      filters:
+        - throttle: 5s
+
+  - platform: copy
+    name: "Ambient light"
+    source_id: ambient_light_sensor_fast
+    filters: 
+      - throttle: 5s
+
+  - platform: copy
+    source_id: ambient_light_sensor_fast
+    id: desired_display_intencity
+    internal: True
+    filters: 
+      - calibrate_linear: 
+          method: exact
+          datapoints: 
+            - 0 -> 0.
+            - 10 -> 0.
+            - 80 -> 1.
+            - 140 -> 2.
+            - 300 -> 3.
+            - 2000 -> 7.
+      - lambda: "return ceil(x);"
+      - clamp: 
+          max_value: 7
+          min_value: 0  
+          
+    on_value: 
+      then:
+        - if: 
+            condition: 
+              - switch.is_on: auto_brightness_switch
+            then: 
+              - lambda: |
+                  id(tm1637_display).set_intensity(x);
+
+  - platform: adc
+    pin: 1
+    attenuation: 11db
+    accuracy_decimals: 4
+    update_interval: 1s
+    id: battery_voltage_unfiltrered
+    name: Devider Voltage Unfiltered
+    entity_category: diagnostic
+    internal: True
+  - platform: copy
+    source_id: battery_voltage_unfiltrered
+    id: battery_voltage_raw
+    name: Devider voltage
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    filters: 
+      - exponential_moving_average:
+          alpha: 0.1
+          send_every: 5
+  
+  - platform: copy
+    id: battery_voltage
+    source_id: battery_voltage_raw
+    name: Battery Voltage
+    accuracy_decimals: 2
+    # 99.05 kOhm, 516 kOhm  
+    filters: 
+      - lambda: "return x*1.89764693-0.09737394839;"
+      # - lambda: "return x*(99.05+516.0)/99.05;"
+      # - calibrate_linear:
+      #     - 0. -> 0.0
+      #     - 1.367 -> 2.5
+      #     - 1.734 -> 3.2
+      #     - 1.895 -> 3.5
+      #     - 2.006 -> 3.7
+      #     - 2.060 -> 3.8
+      #     - 2.105 -> 3.9
+      #     - 2.161 -> 4.0
+      #     - 2.216 -> 4.1
+      #     - 2.266 -> 4.2
+      #     - 2.311 -> 4.3
+      #     - 2.371 -> 4.4
+      #     - 2.417 -> 4.5
+  - platform: copy
+    source_id: battery_voltage
+    name: Battery
+    device_class: battery
+    unit_of_measurement: "%"
+    filters: 
+      - lambda: |
+          // see https://electronics.stackexchange.com/a/551667
+          return 123.0 * (1.0 - 1.0/pow(1. + pow(x/3.7, 80.), 0.165));
+
+binary_sensor:
+  - platform: gpio
+    name: Button
+    pin: 
+      number: 10
+      inverted: True
+  - platform: gpio
+    name: Charging
+    pin: 
+      number: 7
+      inverted: True
+      mode: 
+        input: True
+        pullup: True
+  - platform: gpio
+    name: Fully charged
+    pin: 
+      number: 8
+      inverted: True
+      mode:
+        input: True
+        pullup: True
+
+text:
+  - platform: template
+    name: Set rtttl
+    id: rtttl_text
+    optimistic: true
+    mode: text
+
+
+button:
+  - platform: restart
+    name: Restart device
+    entity_category: config
+  - platform: template
+    name: rtttl
+    on_press: 
+      then:
+         # 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
+        - rtttl.play: !lambda |
+            return id(rtttl_text).state;
+
+
+  - platform: template
+    name: Buzz
+    on_press: 
+      then:
+        - output.turn_on: buzzer
+        - output.set_level:
+            id: buzzer
+            level: "80%"
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "50Hz"
+        - delay: 0.3s
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "200Hz"
+        - delay: 0.3s
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "500Hz"
+        - delay: 0.3s
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "1000Hz"
+        - delay: 0.3s
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "2000Hz"
+        - delay: 0.3s
+        - output.ledc.set_frequency:
+            id: buzzer
+            frequency: "5000Hz"
+        - delay: 0.3s
+        - output.turn_off: buzzer
+
+
+number:
+  - platform: template
+    name: Display intensity
+    max_value: 7
+    min_value: 0
+    step: 1
+    optimistic: True
+    on_value: 
+      then:
+        - lambda: 
+            id(tm1637_display).set_intensity(x);
+
+display:
+    platform: tm1637
+    id: tm1637_display
+    clk_pin: 3
+    dio_pin: 4
+    inverted: false
+    length: 4
+    update_interval: 500ms
+    intensity: 7
+    lambda: |-
+      static int i = 0;
+      i++;
+      if ((i % 2) == 0)
+        it.strftime("%H.%M", id(sntp_time).now());
+      else
+        it.strftime("%H%M", id(sntp_time).now());
+
