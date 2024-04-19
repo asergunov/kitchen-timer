@@ -1,9 +1,8 @@
-# external_components:
-#   - source: "github://asergunov/esphome_esphome@i2s_pdm"
-#     components:
-#       - i2s_audio
-#       - i2s_audio/speaker
-#     refresh: 0s
+external_components:
+  - source: "github://asergunov/esphome_esphome@tm1637_off"
+    components:
+      - tm1637
+    refresh: 0s
 
 substitutions:
   display_clk_pin: "9"
@@ -17,6 +16,7 @@ substitutions:
   battery_voltage_pin: "1"
   charging_pin: "5"
   fully_charged_pin: "0"
+  timezone: "<+06>-6"
 
 esphome:
   name: kitchen-timer
@@ -31,6 +31,9 @@ esphome:
   on_boot:
     then:
       - deep_sleep.prevent: deep_sleep_component
+      - lambda: |
+          setenv("TZ", "${timezone}", 1);
+          tzset();
 
 globals:
   - id: menu_active
@@ -89,10 +92,20 @@ ota:
       - lambda: |
           id(tm1637_display).printf("%2.1f%", x);
 
+packages: 
+  signal1: !include 
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 1
+  signal2: !include 
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 2
+
 deep_sleep:
   id: deep_sleep_component
   run_duration: 1000ms
-  sleep_duration: 9000ms
+  sleep_duration: 5000ms
 
 wifi:
   id: wifi_component
@@ -125,6 +138,7 @@ web_server:
 time:
   - platform: sntp
     id: sntp_time
+    timezone: ${timezone}
 
 switch:
   - platform: gpio
@@ -160,7 +174,9 @@ switch:
 output:
   - platform: ledc
     id: rtttl_out
-    pin: ${passive_buzzer_pin}
+    pin: 
+      number: ${passive_buzzer_pin}
+      inverted: False
 
 rtttl:
   output: rtttl_out
@@ -257,6 +273,8 @@ sensor:
           max_value: 7
           min_value: 0
       - delta: 0.1% # to prevent publishing non-changed values
+      - lambda: "return x + 1;"
+          
 
     on_value:
       then:
@@ -290,6 +308,10 @@ sensor:
     accuracy_decimals: 4
     entity_category: diagnostic
     filters:
+      - lambda: |
+          if(id(charging_sensor).state)
+            return {};
+          return x;
       - exponential_moving_average:
           alpha: 0.1
           send_every: 5
@@ -299,9 +321,6 @@ sensor:
     device_class: battery
     unit_of_measurement: "%"
     filters:
-      # - lambda: |
-      #     // see https://electronics.stackexchange.com/a/551667
-      #     return 123.0 * (1.0 - 1.0/pow(1. + pow(x/3.7, 80.), 0.165));
       - calibrate_linear:
           method: exact
           datapoints:
@@ -326,15 +345,18 @@ sensor:
             - 4.2 -> 100.
 
   - platform: adc
-    pin: ${charging_current_pin}
     name: Charging current
+    pin: ${charging_current_pin}
     device_class: current
+    id: charging_current_fast
     attenuation: auto
     unit_of_measurement: mA
     update_interval: 5s
     filters: 
       - lambda: |
-          return x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/;
+          if(id(charging_sensor).state)
+            return x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/;
+          return 0.0;
 
 binary_sensor:
   - platform: gpio
@@ -359,12 +381,18 @@ binary_sensor:
         pullup: True
   - platform: gpio
     name: Fully charged
+    id: fully_charged
     pin:
       number: ${fully_charged_pin}
       inverted: True
       mode:
         input: True
         pullup: True
+  - platform: template
+    name: AC Powered
+    id: ac_powered
+    lambda: |
+      return id(fully_charged).state || id(charging_sensor).state;
 
 text:
   - platform: template
@@ -375,15 +403,25 @@ text:
     restore_value: True
     initial_value: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
 
+
 button:
   - platform: restart
     name: Restart device
     entity_category: config
   - platform: template
+    name: Sleep for 5 seconds
+    on_press:
+      then:
+        - deep_sleep.enter:
+            id: deep_sleep_component
+            sleep_duration: 5s
+  - platform: template
     name: rtttl
     on_press:
       then:
         - rtttl.play: !lambda |
+            // RTTTL:d=4,o=2,b=125:8e2, 4g2, 2p, 8g2, 4e2, 2p, 8a2, 8g2, 8a2, 8g2, 8a2, 8g2, 8a2, 8g2, 8a2, 4b2, 2p,
+            // boomer:d=4,o=2,b=125:8e2,4g2.,2p-,8g2,4e2.,2p-,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b.,2p-
             const char *song_00 = "Pacman:d=32,o=5,b=112:32p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,c6,p,c7,p,g6,p,e6,p,c7,g6,16p,16e6,16p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,d#6,e6,f6,p,f6,f#6,g6,p,g6,g#6,a6,p,b.6";
             const char *song_01 = "Druid:d=4,o=5,b=80:8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,c7,d7,8p,8d.7,16d#7,16d7,16d#7,d7,8c7,16a#6,16c7,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,8a6,8f6,g6";
             const char *song_02 = "lemmings:d=4,o=5,b=140:f#6,8f#.6,16f#6,8f#.6,16e6,d6,f#6,8f#.6,16f#6,16f#.6,16g6,16f#.6,e6,f#6,8f#.6,16f#6,8f#.6,16g6,a6,1c#6,b,8b.,16b,8b.,16c#6,d6,c#6,8c#.6,16c#6,8c#.6,16d6,e6,a6,f#6,d6,a,1e6";
@@ -424,15 +462,17 @@ number:
   - platform: template
     id: display_intensity_number
     name: Display intensity
-    max_value: 7
+    max_value: 8
     min_value: 0
     step: 1
     update_interval: 1s
     optimistic: True
+    restore_value: True
     on_value:
       then:
         - lambda: |
-            id(tm1637_display).set_intensity(x);
+            id(tm1637_display).set_on(int(x) != 0);
+            id(tm1637_display).set_intensity(max(1, int(x)) - 1);
 
 display:
   platform: tm1637
@@ -448,6 +488,7 @@ display:
       it.print(0, id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
       return;
     }
+
     static int i = 0;
     i++;
     if ((i % 2) == 0)
