@@ -34,6 +34,18 @@ esphome:
       - lambda: |
           setenv("TZ", "${timezone}", 1);
           tzset();
+      - lambda: |
+          const auto& _songs = id(songs);
+          std::vector<std::string> names;
+          names.reserve(_songs.size());
+          for(const auto& tune : _songs) {
+            const auto semicolon_index = std::find(std::begin(tune), std::end(tune), ':');
+            names.push_back({std::begin(tune), semicolon_index});
+          }
+
+          for(auto&& select: {id(signal_1_sound), signal_2_sound}) {
+            select->traits.set_options(names);
+          }
 
 globals:
   - id: menu_active
@@ -42,6 +54,60 @@ globals:
   - id: enable_sleeping
     type: bool
     initial_value: "false"
+  - id: songs
+    type: std::vector<std::string>
+    restore_value: no
+    initial_value: |-
+      {
+        "Thunderb:d=4,o=5,b=125:8g#5,16f5,16g#5,a#5,8p,16d#5,16f5,8g#5,8a#5,8d#6,16f6,16c6,8d#6,8f6,2a#5,8g#5,16f5,16g#5,a#5,8p,16d#5,16f5,8g#5,8a#5,8d#6,16f6,16c6,8d#6,8f6,2g6,8g6,16a6,16e6,g6,8p,16e6,16d6,8c6,8b5,8a.5,16b5,8c6,8e6,2d6,8d#6,16f6,16c6,d#6,8p,16c6,16a#5,8g#5,8g5,8f.5,16g5,8g#5,8a#5,8c6,8a#5,8g5,8d#5",
+        "RightHer:d=4,o=5,b=125:8a,8b,8c6,8b,8d6,8c6,8b,8a,8g,8a,8b,8a,8c6,8b,8a,8g,8a,8b,8c6,8b,8d6,8c6,8b,8a,8g,8a,8b,8a,8c6,8b,8a,8b,8a,p,8a,8e,p,8b,8a,p,8a,8e",
+        "SkippyTh:d=4,o=5,b=112:16f,16g,16a,a#,32p,16d,8c,p,16f,16a#,16a#,16a#,16a#,16p,16d,c,32p,16f,16a#,16a#,16a#,8a#,16d,16c,16p,16d,16d#,16p,16c,16d,8p,8f,16p,f.",
+        "BevHills:d=4,o=5,b=160:f#,8a.,8f#,16f#,8a#,8f#,8e,f#,8c.6,8f#,16f#,8d6,8c#6,8a,8f#,8c#6,8f#6,16f#,8e,16e,8c#,8g#,f#.",
+        "Elec6:d=16,o=5,b=180:8d.,p,d,p,f,p,g,p,f,p,32d,p.,32c#,p.,8c.,p,32c,p.,8a.4,p,32c,p.,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c",
+        "MontyPyton:d=4,o=5,b=200:32p,f6,8e6,d6,8c#6,c6,8b,a#,8a,8g,8a,8a#,a,8g,2c6,8p,8c6,8a,8p,8a,8a,8g#,8a,8f6,8p,8c6,8c6,8p,8a,8a#,8p,8a#,8a#,8p,8c6,2d6,8p,8a#,8g,8p,8g,8g,8f#,8g,8e6,8p,8d6,8d6,8p,8a#,8a,8p,8a,8a,8p,8a#,2c6,8p,8c6",
+        "PiratesTheme:d=4,o=6,b=200:8d,8e,2f,8g,8a,g,f,e,f,g,a,g,p,8f,8g,a,p,8g,8f,e,f,e,d,p,8e,8c,d,8p,p,8d,8e,f,p,8e,8f,g,f,g,a,g,f,d",
+        "Twilight:d=16,o=7,b=285:a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,b5,c#6,b5,c#6,b5,c#6,b5,c#6,b5,c#6,b5,d6,a#5,d6,a#5,d#6,a5,2p.,g6,a#6,d#,e,c#,e,d#,a#6,g#6,a#6,e,g#,e,a#",
+        "XFiles1:d=4,o=5,b=125:e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,g6,f#6,e6,d6,e6,2b.,1p,g6,f#6,e6,d6,f#6,2b.,1p,e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,e6,2b.",
+        "MissionTheme:d=4,o=5,b=112:16g6,8p,16g6,8p,16f6,16p,16f#6,16p,16g6,8p,16g6,8p,16a#6,16p,16c7,16p,16g6,8p,16g6,8p,16f6,16p,16f#6,16p,16g6,8p,16g6,8p,16a#6,16p,16c7,16p,16a#6,16g6,2d6,32p,16a#6,16g6,2c#6,32p,16a#6,16g6,2c6,16p,16a#,16c6"
+        "Pacman:d=32,o=5,b=112:32p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,c6,p,c7,p,g6,p,e6,p,c7,g6,16p,16e6,16p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,d#6,e6,f6,p,f6,f#6,g6,p,g6,g#6,a6,p,b.6",
+        "Druid:d=4,o=5,b=80:8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,c7,d7,8p,8d.7,16d#7,16d7,16d#7,d7,8c7,16a#6,16c7,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,8a6,8f6,g6",
+        "Lemmings:d=4,o=5,b=140:f#6,8f#.6,16f#6,8f#.6,16e6,d6,f#6,8f#.6,16f#6,16f#.6,16g6,16f#.6,e6,f#6,8f#.6,16f#6,8f#.6,16g6,a6,1c#6,b,8b.,16b,8b.,16c#6,d6,c#6,8c#.6,16c#6,8c#.6,16d6,e6,a6,f#6,d6,a,1e6",
+        "MagicPockets:d=4,o=5,b=112:8f#6,8c#6,p,8c#6,8d#6,8c#6,8e6,8p,8d#6,16p,8c#6,16p,8c#6,8d#6,8c#6,8f#6,8c#6,p,8c#6,8d#6,8c#6,8e6,8p,8d#6,16p,8c#6,16p,8c#6,8d#6,8c#6,8a#.6,8f#.6,8c#6,8d#.6,8f#.6,8g#6,8a#.6,8f#.6,8c#6,8d#.6,8f#.6,8g#6,2a#6,8d#.6,8f#.6,8g#6,a.6,8g#6,16f#6,16d#6,c#6",
+        "RickD:d=4,o=5,b=160:16f#4,f#4,f#,c#.,16a#4,b4,c#,d#.,16c#,c#,g#,f.,16c#,d#,f,f#.,16f#4,f#4,f#,c#.,16a#4,b4,c#,2d#,a,p,b,p,a#4,c#,2f#4",
+        "c64_bjack:d=4,o=5,b=225:f6,g#6,g#6,8c#7,8d#7,f7,c#7,2c#7,f6,g#6,g#6,8c#7,8f7,f7,d#7,2d#7,f6,g#6,g#6,8f7,8g#7,g#7,f#7,2f#7,g#7,f#7,f7,d#7,c#7,c7,a#6,c7,1c#7",
+        "Comicb:d=4,o=5,b=125:8g,16g,16g,16f6,16g6,16g,16g,8g,16g,16g,16f6,16g6,16g,16g,8a#,16a#,16a#,16g#6,16a#6,16a#,16a#,8f,16f,16f,16d#6,16f6,16f,16f,8g,16g,16g,16f6,16g6,16g,16g,8g,16g,16g,16f6,16g6,16g,16g,8a#,16a#,16a#,16g#6,16a#6,16a#,16a#,8c6,16c6,16c6,16a#6,16c7,16c6,16c6",
+        "WormSong:d=4,o=5,b=112:g,a,b.,8d6,d6,8c6,8b,8a.,16g,8a,8b,2a,32p,8a.,16g,8a,8b,2e,32p,8a.,16g,8a,8b,a,8g,8a,b.,8d6,d6,8c6,8b,8a.,16g,8a,8b,2a,32p,8a.,16g,8a,8b,2e,32p,8a.,16g,8a,8b,a",
+        "Flimboq1:d=4,o=5,b=125:16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8d.6,c6,8p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,8g,16a#,16p,8g,f.,p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,8d6,8c6,8a#,c6,8a#,8c6,8a#,8d6,8f6,8d6,8f6,8d6,8c6,8a#,8g,8f,8g,8a#,a#",
+        "GoldenAxe:d=4,o=5,b=112:8a4,32p,16b4,16p,2c,16p,8a4,32p,16b4,16p,2c,16p,8b4,32p,16c,16p,d,32p,8g.4,16c,16b4,2a4",
+        "Giana:d=4,o=5,b=125:8g,8g,8a,8g,8a#,8g,8a,8g,8g,8g,8c6,8g,8a#,8g,8a,8g,8g,8f,8a,8f,8a#,8f,8c6,8f,8d6,8f,8c6,8f,8a#,8f,8a,8f,8g,8d#,8a,8d#,8a#,8d#,8a,8d#,8g,8d#,8c6,8d#,8a#,8d#,8a,8d#,8f#,8d,8g,8d,8a,8d,8a#,8d,8c6,8d,8d6,8d,8a#,8d,8a,8d",
+        "Krakout:d=4,o=4,b=160:16b,16p,16b5,16p,16d#5,16p,16b5,16p,16e5,16p,16e6,16p,16e6,16p,c#5,16f6,16p,16f5,16p,16f6,16p,16f#5,16p,16f#6,16p,8f#.6,16p,16b,16p,16b5,16p,16d#5,16p,16b5,16p,16e5,16p,16e6,16p,16e6,16p,c#5,16f6,16p,16f5,16p,16f6,16p,16f#5,16p,16f#6,16p,8f#.6,16p",
+        "Lotus:d=4,o=5,b=100:16c6,16c6,16c6,8a#,8c6,16a#,8g#,8c6,8g,8a#,16c6,16c6,16c6,8a#,8c6,16a#,8g#,8c6,8g,8d#6",
+        "GBusters:d=4,o=5,b=112:16b,16b,8d#6,8b,8c#6,8a,2p,16b,16b,16b,16b,8a,8b,2p,16b,16b,8d#6,8b,8c#6,8a,2p,16b,16b,16b,16b,8a,8c#6,8b",
+        "outrun_magic:d=4,o=5,b=160:f6,d#6,8g#.6,f6,d#6,8c#.6,d#6,c6,2g#.,c#6,c6,8d#.6,c#6,c6,8f.,a#,16c.6,1a#,f6,d#6,8g#.6,f6,d#6,8c#.6,d#6,c6,2g#.,c#6,c6,8d#.6,c#6,c6,16f.,16g#.,c6,2a#.",
+        "Popeye:d=4,o=5,b=140:16g.,16f.,16g.,16p,32p,16c.,16p,32p,16c.,16p,32p,16e.,16d.,16c.,16d.,16e.,16f.,g,8p,16a,16f,16a,16c6,16b,16a,16g,16a,16g,8e,16g,16g,16g,16g,8a,16b,32c6,32b,32c6,32b,32c6,32b,8c6",
+        "RainbowIslands:d=4,o=5,b=125:c,8p,c6,8p,8b.,8g,16a,8b,8c6,16p,a,8f,16g,8a,8g#.,2g,8p,16g,8f,16g,8f,16e,8d,8g,16p,e,8c,16d,8e,8f,8p,8d,16p,8e,16p,8f,16p,8f#,g",
+        "BubbleBobble:d=4,o=5,b=125:8a#6,8a6,8g.6,16f6,8a6,8g6,8f6,8d#6,8g6,8f6,16d#6,8d.6,f.6,16d6,16c6,8a#,8c6,8d6,8d#6,8c6,16d6,8d#.6,8f6,8f6,8g6,16a6,8g.6,8f6,8f6,8g6,8a6,8a#6,8a6,8g.6,16f6,8a6,8g6,8f6,8d#6,8g6,8f6,16d#6,8d.6,f.6,16d6,16c6,8a#,8c6,8d6,8d#6,8c6,16d6,8d#.6,8f6,8f6,8g6,16a6,8f.6,8a#.6",
+        "Rambo:d=4,o=5,b=125:16f#4,16f#,16c#,16b4,2c#.,16a4,b4,2f#.4,16f#4,16f#,16c#,16b4,2c#.,8f#,8e.,16f#,2e.,16f#4,16f#,16c#,16b4,2c#.,16a4,b4,2f#.4,16f#4,16f#,16c#,16e,b.4,8c#,8b.4,16a4,2b4",
+        "StreetRod:d=4,o=5,b=125:16f#4,16a#4,16b4,16c#,8f#,8f#,16p,8f#,16p,16f#4,16a#4,16b4,16c#,8f#,8f#,16p,8a,16p,16f#4,16a#4,16b4,16c#,16f#,16f#,16f#,16e,16e,16e,16d#,16d#,16d#,16d,16d,16d,8c#,8c#,16p,8c#,16p,16a#4,8b4,16a#4,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8c#,p,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8e,16p,16e,8d#,16c#,8b4,16d#,8f#,16b4,8d#,16f#,8b4,16d#,8f#,16b4,8d#,8f#,p,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8e,16p,16e,8d#,16c#",
+        "BTTF:d=4,o=5,b=160:32p,p,8c.,16p,g,16p,16c.6,16p,a#.,16p,16a,16p,16g,16p,8a,16p,8g,16p,8f,16p,1g.,1p,g.,16p,c.,16p,2f#.,16p,32g.,32p,32a.,32p,8g,32p,8e,32p,8c,32p,f#,16p,32g.,32p,32a.,32p,8g.,32p,8d.,32p,8g.,32p,8d.6,32p,d6,16p,c#6,16p,32b.,32p,32c#.6,32p,2d6",
+        "Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6",
+        "A-Team:d=8,o=5,b=125:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#.6,16c6,16a#,g#.,2a#",
+        "Axel-F:d=4,o=5,b=125:g,8a#.,16g,16p,16g,8c6,8g,8f,g,8d.6,16g,16p,16g,8d#6,8d6,8a#,8g,8d6,8g6,16g,16f,16p,16f,8d,8a#,2g,p,16f6,8d6,8c6,8a#,g,8a#.,16g,16p,16g,8c6,8g,8f,g,8d.6,16g,16p,16g,8d#6,8d6,8a#,8g,8d6,8g6,16g,16f,16p,16f,8d,8a#,2g",
+        "OutrunSplash:d=4,o=5,b=160:8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8a#,8c#,8g#,8c#6,8c#,8g#,8c#6,8c#,8c#6,16c#.4,16g#.4,16c#.,16d.4,16a.4,16d.,16d#.4,16a#.4,16d#.,16e.4,16b.4,16e.,16f.4,16c.,16f.,16f#.4,16c#.,16f#.,16g.4,16d.,16g.,16g#.4,16d#.,16g#.,2c#.,8f#,32a#,b.,a#,8g#,a#,1e,32d#7,e.6,d#6,8c#6,d#6,1a#,32c6,c#6,b,2a#.,32f,16f#.,1d#,1e,32f#,32g,g#,8b,a#,g#,8f#,1d#,32f,f#,8a#,g#,1a,32c#6,d6,1c#6,8b,32c6,1c#6",
+        "OutrunBreeze:d=4,o=5,b=125:1f#,16b,16a,2g#,8a,8g#,1f#,2g#,8e,1f#,p,8a,8g#,16f#,16e,2f#,a,8b,2g#,f#,e,1f#,8a,8g#,16f#,16e,2f#,g#,8a,2b,32c6,8c#6,e6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,16a6,8b6,8a6,16g#6,1f#6",
+        "FlimBoq:d=4,o=5,b=160:8g,8b,8p,8d6,8p,8g6,8p,e6,8c6,8p,g,8e,8f#,8g,8f#,8g,8p,8a,8p,8d6,8p,c6,8b,8a,b,8g,8d,8f#,8g,8b,8p,8d6,8p,8g6,8p,a6,8e6,8p,c6,8g,8c6,8g6,8f#6,e6,d6,f#6,g.6",
+        "Boop:d=4,o=5,b=250:c5",
+        "Beep:d=4,o=5,b=250:c6",
+        "BeepBeep:d=4,o=5,b=250:c6,p,c6",
+        "NokiaTun:d=4,o=5,b=225:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a",
+        "two_short:d=4,o=5,b=100:16e6,16e6",
+        "long:d=1,o=5,b=100:e6",
+        "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e",
+        "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b",
+        "star_wars:d=16,o=5,b=100:4e,4e,4e,8c,p,g,4e,8c,p,g,4e,4p,4b,4b,4b,8c6,p,g,4d#,8c,p,g,4e,8p",
+        "mission_imp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d",
+        "mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6",
+      }
 
   # on_boot:
   #   priority: 1000.0
@@ -150,7 +216,7 @@ switch:
       inverted: True
   - platform: template
     optimistic: True
-    name: Flip display
+    name: Display Flip
     restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
       then:
@@ -161,7 +227,7 @@ switch:
         - lambda: |
             id(tm1637_display).set_inverted(false);
   - platform: template
-    name: Auto Brightness
+    name: Display Intensity Auto
     id: auto_brightness_switch
     optimistic: True
     restore_mode: RESTORE_DEFAULT_ON
@@ -181,7 +247,6 @@ output:
 rtttl:
   output: rtttl_out
   id: my_rtttl
-  gain: 50%
 
 i2c:
   - sda: 20
@@ -202,7 +267,7 @@ script:
 sensor:
   - platform: rotary_encoder
     id: encoder
-    name: Encoder
+    name: Encoder Position
     pin_a:
       inverted: True
       number: ${rotary_encoder_a_pin}
@@ -232,24 +297,23 @@ sensor:
     id: light_sensor
     address: 0x10
     update_interval: 0.5s
-
     # short variant of sensor definition:
     ambient_light:
       id: ambient_light_sensor_fast
-      name: Ambient Light Sensor Fast
+      name: Light Ambient Fast
       internal: True
 
     infrared:
-      name: Infrared light
+      name: Light Infrared
       filters:
         - throttle: 5s
     full_spectrum:
-      name: Full spectrum light
+      name: Light Full spectrum
       filters:
         - throttle: 5s
 
   - platform: copy
-    name: "Ambient light"
+    name: Light Ambient
     source_id: ambient_light_sensor_fast
     filters:
       - throttle: 5s
@@ -345,7 +409,7 @@ sensor:
             - 4.2 -> 100.
 
   - platform: adc
-    name: Charging current
+    name: Power Charging Current
     pin: ${charging_current_pin}
     device_class: current
     id: charging_current_fast
@@ -361,7 +425,7 @@ sensor:
 binary_sensor:
   - platform: gpio
     id: encoder_button
-    name: Button
+    name: Encoder Button
     pin:
       number: ${rotary_encoder_button_pin}
       inverted: True
@@ -371,7 +435,7 @@ binary_sensor:
             id(menu_active) = !id(menu_active);
             id(tm1637_display).update();
   - platform: gpio
-    name: Charging
+    name: Power Charging
     id: charging_sensor
     pin:
       number: ${charging_pin}
@@ -380,7 +444,7 @@ binary_sensor:
         input: True
         pullup: True
   - platform: gpio
-    name: Fully charged
+    name: Power Fully Charged
     id: fully_charged
     pin:
       number: ${fully_charged_pin}
@@ -389,14 +453,14 @@ binary_sensor:
         input: True
         pullup: True
   - platform: template
-    name: AC Powered
+    name: Power AC
     id: ac_powered
     lambda: |
       return id(fully_charged).state || id(charging_sensor).state;
 
 text:
   - platform: template
-    name: Set rtttl
+    name: Sound Add
     id: rtttl_text
     optimistic: true
     mode: text
@@ -416,52 +480,23 @@ button:
             id: deep_sleep_component
             sleep_duration: 5s
   - platform: template
-    name: rtttl
+    name: Sound Play
     on_press:
       then:
-        - rtttl.play: !lambda |
-            // RTTTL:d=4,o=2,b=125:8e2, 4g2, 2p, 8g2, 4e2, 2p, 8a2, 8g2, 8a2, 8g2, 8a2, 8g2, 8a2, 8g2, 8a2, 4b2, 2p,
-            // boomer:d=4,o=2,b=125:8e2,4g2.,2p-,8g2,4e2.,2p-,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b.,2p-
-            const char *song_00 = "Pacman:d=32,o=5,b=112:32p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,c6,p,c7,p,g6,p,e6,p,c7,g6,16p,16e6,16p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,d#6,e6,f6,p,f6,f#6,g6,p,g6,g#6,a6,p,b.6";
-            const char *song_01 = "Druid:d=4,o=5,b=80:8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,c7,d7,8p,8d.7,16d#7,16d7,16d#7,d7,8c7,16a#6,16c7,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,8a6,8f6,g6";
-            const char *song_02 = "lemmings:d=4,o=5,b=140:f#6,8f#.6,16f#6,8f#.6,16e6,d6,f#6,8f#.6,16f#6,16f#.6,16g6,16f#.6,e6,f#6,8f#.6,16f#6,8f#.6,16g6,a6,1c#6,b,8b.,16b,8b.,16c#6,d6,c#6,8c#.6,16c#6,8c#.6,16d6,e6,a6,f#6,d6,a,1e6";
-            const char *song_03 = "magicpockets:d=4,o=5,b=112:8f#6,8c#6,p,8c#6,8d#6,8c#6,8e6,8p,8d#6,16p,8c#6,16p,8c#6,8d#6,8c#6,8f#6,8c#6,p,8c#6,8d#6,8c#6,8e6,8p,8d#6,16p,8c#6,16p,8c#6,8d#6,8c#6,8a#.6,8f#.6,8c#6,8d#.6,8f#.6,8g#6,8a#.6,8f#.6,8c#6,8d#.6,8f#.6,8g#6,2a#6,8d#.6,8f#.6,8g#6,a.6,8g#6,16f#6,16d#6,c#6";
-            const char *song_04 = "rick_d:d=4,o=5,b=160:16f#4,f#4,f#,c#.,16a#4,b4,c#,d#.,16c#,c#,g#,f.,16c#,d#,f,f#.,16f#4,f#4,f#,c#.,16a#4,b4,c#,2d#,a,p,b,p,a#4,c#,2f#4";
-            const char *song_05 = "c64_bjack:d=4,o=5,b=225:f6,g#6,g#6,8c#7,8d#7,f7,c#7,2c#7,f6,g#6,g#6,8c#7,8f7,f7,d#7,2d#7,f6,g#6,g#6,8f7,8g#7,g#7,f#7,2f#7,g#7,f#7,f7,d#7,c#7,c7,a#6,c7,1c#7";
-            const char *song_06 = "comicb:d=4,o=5,b=125:8g,16g,16g,16f6,16g6,16g,16g,8g,16g,16g,16f6,16g6,16g,16g,8a#,16a#,16a#,16g#6,16a#6,16a#,16a#,8f,16f,16f,16d#6,16f6,16f,16f,8g,16g,16g,16f6,16g6,16g,16g,8g,16g,16g,16f6,16g6,16g,16g,8a#,16a#,16a#,16g#6,16a#6,16a#,16a#,8c6,16c6,16c6,16a#6,16c7,16c6,16c6";
-            const char *song_07 = "wormsong:d=4,o=5,b=112:g,a,b.,8d6,d6,8c6,8b,8a.,16g,8a,8b,2a,32p,8a.,16g,8a,8b,2e,32p,8a.,16g,8a,8b,a,8g,8a,b.,8d6,d6,8c6,8b,8a.,16g,8a,8b,2a,32p,8a.,16g,8a,8b,2e,32p,8a.,16g,8a,8b,a";
-            const char *song_08 = "flimboq1:d=4,o=5,b=125:16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8d.6,c6,8p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,8g,16a#,16p,8g,f.,p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,8d6,8c6,8a#,c6,8a#,8c6,8a#,8d6,8f6,8d6,8f6,8d6,8c6,8a#,8g,8f,8g,8a#,a#";
-            const char *song_09 = "goldenaxe:d=4,o=5,b=112:8a4,32p,16b4,16p,2c,16p,8a4,32p,16b4,16p,2c,16p,8b4,32p,16c,16p,d,32p,8g.4,16c,16b4,2a4";
-            const char *song_10 = "giana:d=4,o=5,b=125:8g,8g,8a,8g,8a#,8g,8a,8g,8g,8g,8c6,8g,8a#,8g,8a,8g,8g,8f,8a,8f,8a#,8f,8c6,8f,8d6,8f,8c6,8f,8a#,8f,8a,8f,8g,8d#,8a,8d#,8a#,8d#,8a,8d#,8g,8d#,8c6,8d#,8a#,8d#,8a,8d#,8f#,8d,8g,8d,8a,8d,8a#,8d,8c6,8d,8d6,8d,8a#,8d,8a,8d";
-            const char *song_11 = "krakout:d=4,o=4,b=160:16b,16p,16b5,16p,16d#5,16p,16b5,16p,16e5,16p,16e6,16p,16e6,16p,c#5,16f6,16p,16f5,16p,16f6,16p,16f#5,16p,16f#6,16p,8f#.6,16p,16b,16p,16b5,16p,16d#5,16p,16b5,16p,16e5,16p,16e6,16p,16e6,16p,c#5,16f6,16p,16f5,16p,16f6,16p,16f#5,16p,16f#6,16p,8f#.6,16p";
-
-            const char *song_12 = "lotus:d=4,o=5,b=100:16c6,16c6,16c6,8a#,8c6,16a#,8g#,8c6,8g,8a#,16c6,16c6,16c6,8a#,8c6,16a#,8g#,8c6,8g,8d#6";
-            const char *song_13 = "gbusters:d=4,o=5,b=112:16b,16b,8d#6,8b,8c#6,8a,2p,16b,16b,16b,16b,8a,8b,2p,16b,16b,8d#6,8b,8c#6,8a,2p,16b,16b,16b,16b,8a,8c#6,8b";
-            const char *song_14 = "outrun_magic:d=4,o=5,b=160:f6,d#6,8g#.6,f6,d#6,8c#.6,d#6,c6,2g#.,c#6,c6,8d#.6,c#6,c6,8f.,a#,16c.6,1a#,f6,d#6,8g#.6,f6,d#6,8c#.6,d#6,c6,2g#.,c#6,c6,8d#.6,c#6,c6,16f.,16g#.,c6,2a#.";
-            const char *song_15 = "Popeye:d=4,o=5,b=140:16g.,16f.,16g.,16p,32p,16c.,16p,32p,16c.,16p,32p,16e.,16d.,16c.,16d.,16e.,16f.,g,8p,16a,16f,16a,16c6,16b,16a,16g,16a,16g,8e,16g,16g,16g,16g,8a,16b,32c6,32b,32c6,32b,32c6,32b,8c6";
-            const char *song_16 = "rainbowislands:d=4,o=5,b=125:c,8p,c6,8p,8b.,8g,16a,8b,8c6,16p,a,8f,16g,8a,8g#.,2g,8p,16g,8f,16g,8f,16e,8d,8g,16p,e,8c,16d,8e,8f,8p,8d,16p,8e,16p,8f,16p,8f#,g";
-            const char *song_17 = "Bubble Bobble:d=4,o=5,b=125:8a#6,8a6,8g.6,16f6,8a6,8g6,8f6,8d#6,8g6,8f6,16d#6,8d.6,f.6,16d6,16c6,8a#,8c6,8d6,8d#6,8c6,16d6,8d#.6,8f6,8f6,8g6,16a6,8g.6,8f6,8f6,8g6,8a6,8a#6,8a6,8g.6,16f6,8a6,8g6,8f6,8d#6,8g6,8f6,16d#6,8d.6,f.6,16d6,16c6,8a#,8c6,8d6,8d#6,8c6,16d6,8d#.6,8f6,8f6,8g6,16a6,8f.6,8a#.6";
-            const char *song_18 = "Rambo:d=4,o=5,b=125:16f#4,16f#,16c#,16b4,2c#.,16a4,b4,2f#.4,16f#4,16f#,16c#,16b4,2c#.,8f#,8e.,16f#,2e.,16f#4,16f#,16c#,16b4,2c#.,16a4,b4,2f#.4,16f#4,16f#,16c#,16e,b.4,8c#,8b.4,16a4,2b4";
-            const char *song_19 = "streetrod:d=4,o=5,b=125:16f#4,16a#4,16b4,16c#,8f#,8f#,16p,8f#,16p,16f#4,16a#4,16b4,16c#,8f#,8f#,16p,8a,16p,16f#4,16a#4,16b4,16c#,16f#,16f#,16f#,16e,16e,16e,16d#,16d#,16d#,16d,16d,16d,8c#,8c#,16p,8c#,16p,16a#4,8b4,16a#4,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8c#,p,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8e,16p,16e,8d#,16c#,8b4,16d#,8f#,16b4,8d#,16f#,8b4,16d#,8f#,16b4,8d#,8f#,p,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8e,16p,16e,8d#,16c#";
-            const char *song_20 = "BTTF:d=4,o=5,b=160:32p,p,8c.,16p,g,16p,16c.6,16p,a#.,16p,16a,16p,16g,16p,8a,16p,8g,16p,8f,16p,1g.,1p,g.,16p,c.,16p,2f#.,16p,32g.,32p,32a.,32p,8g,32p,8e,32p,8c,32p,f#,16p,32g.,32p,32a.,32p,8g.,32p,8d.,32p,8g.,32p,8d.6,32p,d6,16p,c#6,16p,32b.,32p,32c#.6,32p,2d6";
-            const char *song_21 = "Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6";
-            const char *song_22 = "A-Team:d=8,o=5,b=125:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#.6,16c6,16a#,g#.,2a#";
-            const char *song_23 = "Axel-F:d=4,o=5,b=125:g,8a#.,16g,16p,16g,8c6,8g,8f,g,8d.6,16g,16p,16g,8d#6,8d6,8a#,8g,8d6,8g6,16g,16f,16p,16f,8d,8a#,2g,p,16f6,8d6,8c6,8a#,g,8a#.,16g,16p,16g,8c6,8g,8f,g,8d.6,16g,16p,16g,8d#6,8d6,8a#,8g,8d6,8g6,16g,16f,16p,16f,8d,8a#,2g";
-
-            const char *song_100 = "outrun_splash:d=4,o=5,b=160:8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8a#,8c#,8g#,8c#6,8c#,8g#,8c#6,8c#,8c#6,16c#.4,16g#.4,16c#.,16d.4,16a.4,16d.,16d#.4,16a#.4,16d#.,16e.4,16b.4,16e.,16f.4,16c.,16f.,16f#.4,16c#.,16f#.,16g.4,16d.,16g.,16g#.4,16d#.,16g#.,2c#.,8f#,32a#,b.,a#,8g#,a#,1e,32d#7,e.6,d#6,8c#6,d#6,1a#,32c6,c#6,b,2a#.,32f,16f#.,1d#,1e,32f#,32g,g#,8b,a#,g#,8f#,1d#,32f,f#,8a#,g#,1a,32c#6,d6,1c#6,8b,32c6,1c#6";
-            const char *song_101 = "outrun_breeze:d=4,o=5,b=125:1f#,16b,16a,2g#,8a,8g#,1f#,2g#,8e,1f#,p,8a,8g#,16f#,16e,2f#,a,8b,2g#,f#,e,1f#,8a,8g#,16f#,16e,2f#,g#,8a,2b,32c6,8c#6,e6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,16a6,8b6,8a6,16g#6,1f#6";
-            const char *song_102 = "flimboq:d=4,o=5,b=160:8g,8b,8p,8d6,8p,8g6,8p,e6,8c6,8p,g,8e,8f#,8g,8f#,8g,8p,8a,8p,8d6,8p,c6,8b,8a,b,8g,8d,8f#,8g,8b,8p,8d6,8p,8g6,8p,a6,8e6,8p,c6,8g,8c6,8g6,8f#6,e6,d6,f#6,g.6";
-
-            const char *song_252 = "Boop:d=4,o=5,b=250:c5";
-            const char *song_253 = "Beep:d=4,o=5,b=250:c6";
-            const char *song_254 = "BeepBeep:d=4,o=5,b=250:c6,p,c6";
-            const char *song_255 = "NokiaTun:d=4,o=5,b=225:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a";
-            return id(rtttl_text).state;
+        - if:
+            condition: rtttl.is_playing
+            then:
+              - rtttl.stop:
+            else:
+              - rtttl.play: !lambda |
+                  // boomer:d=4,o=2,b=125:8e2,4g2,2p,8g2,4e2,2p,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b2,2p
+                  // boomer:d=4,o=2,b=125:8e2,4g2.,2p-,8g2,4e2.,2p-,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b.,2p-
+                  return id(rtttl_text).state;
 
 number:
   - platform: template
     id: display_intensity_number
-    name: Display intensity
+    name: Display Intensity
     max_value: 8
     min_value: 0
     step: 1
@@ -473,6 +508,16 @@ number:
         - lambda: |
             id(tm1637_display).set_on(int(x) != 0);
             id(tm1637_display).set_intensity(max(1, int(x)) - 1);
+  - platform: template
+    name: Sound Gain
+    max_value: 100
+    min_value: -100
+    step: 1
+    optimistic: True
+    on_value: 
+      then:
+        - lambda: |
+            id(my_rtttl).set_gain(0.01*x);
 
 display:
   platform: tm1637
