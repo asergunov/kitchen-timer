@@ -23,12 +23,13 @@ esphome:
   friendly_name: kitchen_timer
   # libraries:
   #   - esp_pm
-  # includes:
-  #   - kitchen-timer.h
+  includes:
+    - kitchen-timer.h
   platformio_options:
     board_build.f_cpu: 80000000L
     lib_ldf_mode: "chain+"
   on_boot:
+    priority: 1000
     then:
       - deep_sleep.prevent: deep_sleep_component
       - lambda: |
@@ -54,11 +55,22 @@ globals:
   - id: enable_sleeping
     type: bool
     initial_value: "false"
+  - id: semicolon_on
+    type: bool
+    initial_value: "false"
   - id: songs
     type: std::vector<std::string>
     restore_value: no
     initial_value: |-
       {
+        "two_short:d=4,o=5,b=100:16e6,16e6",
+        "Boop:d=4,o=5,b=250:c5",
+        "Beep:d=4,o=5,b=250:c6",
+        "BeepBeep:d=4,o=5,b=250:c6,p,c6",
+        "NokiaTun:d=4,o=5,b=225:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a",
+        "long:d=1,o=5,b=100:e6",
+        "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e",
+        "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b",
         "Thunderb:d=4,o=5,b=125:8g#5,16f5,16g#5,a#5,8p,16d#5,16f5,8g#5,8a#5,8d#6,16f6,16c6,8d#6,8f6,2a#5,8g#5,16f5,16g#5,a#5,8p,16d#5,16f5,8g#5,8a#5,8d#6,16f6,16c6,8d#6,8f6,2g6,8g6,16a6,16e6,g6,8p,16e6,16d6,8c6,8b5,8a.5,16b5,8c6,8e6,2d6,8d#6,16f6,16c6,d#6,8p,16c6,16a#5,8g#5,8g5,8f.5,16g5,8g#5,8a#5,8c6,8a#5,8g5,8d#5",
         "RightHer:d=4,o=5,b=125:8a,8b,8c6,8b,8d6,8c6,8b,8a,8g,8a,8b,8a,8c6,8b,8a,8g,8a,8b,8c6,8b,8d6,8c6,8b,8a,8g,8a,8b,8a,8c6,8b,8a,8b,8a,p,8a,8e,p,8b,8a,p,8a,8e",
         "SkippyTh:d=4,o=5,b=112:16f,16g,16a,a#,32p,16d,8c,p,16f,16a#,16a#,16a#,16a#,16p,16d,c,32p,16f,16a#,16a#,16a#,8a#,16d,16c,16p,16d,16d#,16p,16c,16d,8p,8f,16p,f.",
@@ -96,29 +108,10 @@ globals:
         "OutrunSplash:d=4,o=5,b=160:8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8a#,8c#,8g#,8c#6,8c#,8g#,8c#6,8c#,8c#6,16c#.4,16g#.4,16c#.,16d.4,16a.4,16d.,16d#.4,16a#.4,16d#.,16e.4,16b.4,16e.,16f.4,16c.,16f.,16f#.4,16c#.,16f#.,16g.4,16d.,16g.,16g#.4,16d#.,16g#.,2c#.,8f#,32a#,b.,a#,8g#,a#,1e,32d#7,e.6,d#6,8c#6,d#6,1a#,32c6,c#6,b,2a#.,32f,16f#.,1d#,1e,32f#,32g,g#,8b,a#,g#,8f#,1d#,32f,f#,8a#,g#,1a,32c#6,d6,1c#6,8b,32c6,1c#6",
         "OutrunBreeze:d=4,o=5,b=125:1f#,16b,16a,2g#,8a,8g#,1f#,2g#,8e,1f#,p,8a,8g#,16f#,16e,2f#,a,8b,2g#,f#,e,1f#,8a,8g#,16f#,16e,2f#,g#,8a,2b,32c6,8c#6,e6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,16a6,8b6,8a6,16g#6,1f#6",
         "FlimBoq:d=4,o=5,b=160:8g,8b,8p,8d6,8p,8g6,8p,e6,8c6,8p,g,8e,8f#,8g,8f#,8g,8p,8a,8p,8d6,8p,c6,8b,8a,b,8g,8d,8f#,8g,8b,8p,8d6,8p,8g6,8p,a6,8e6,8p,c6,8g,8c6,8g6,8f#6,e6,d6,f#6,g.6",
-        "Boop:d=4,o=5,b=250:c5",
-        "Beep:d=4,o=5,b=250:c6",
-        "BeepBeep:d=4,o=5,b=250:c6,p,c6",
-        "NokiaTun:d=4,o=5,b=225:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a",
-        "two_short:d=4,o=5,b=100:16e6,16e6",
-        "long:d=1,o=5,b=100:e6",
-        "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e",
-        "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b",
         "star_wars:d=16,o=5,b=100:4e,4e,4e,8c,p,g,4e,8c,p,g,4e,4p,4b,4b,4b,8c6,p,g,4d#,8c,p,g,4e,8p",
         "mission_imp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d",
         "mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6",
       }
-
-  # on_boot:
-  #   priority: 1000.0
-  #   then:
-  #     - lambda: |
-  #         esp_pm_config_esp32c3_t configure = {
-  #           .max_freq_mhz = 80, // 160,
-  #           .min_freq_mhz = 80,
-  #           .light_sleep_enable = false
-  #         };
-  #         ESP_ERROR_CHECK(esp_pm_configure(&configure));
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -140,7 +133,6 @@ logger:
 # debug:
 #   update_interval: 10s
 
-# Enable Home Assistant API
 api:
   encryption:
     key: !secret kitchen_timer.api.encryption
@@ -157,6 +149,7 @@ ota:
     then:
       - lambda: |
           id(tm1637_display).printf("%2.1f%", x);
+          id(tm1637_display).update();
 
 packages: 
   signal1: !include 
@@ -179,10 +172,10 @@ wifi:
   # enable_on_boot: False
   # fast_connect: True
   networks:
+    - ssid: !secret parents.wifi_ssid
+      password: !secret parents.wifi_password
     - ssid: !secret wifi_ssid
       password: !secret wifi_password
-    # - ssid: !secret parents.wifi_ssid
-    #   password: !secret parents.wifi_password
 
 #   # Enable fallback hotspot (captive portal) in case wifi connection fails
 #   ap:
@@ -194,17 +187,17 @@ wifi:
 web_server:
   port: 80
 
-# lcd_menu:
-#   items:
-#     - type: label
-#       text: 'Label'
-#     - type: back
-#       text: 'Back'
-
 time:
   - platform: sntp
     id: sntp_time
     timezone: ${timezone}
+    on_time: 
+      seconds: /1
+      minutes: /1
+      then:
+        - lambda: "id(semicolon_on) = !id(semicolon_on);"
+        - component.update: tm1637_display
+        - script.execute: tick_sound
 
 switch:
   - platform: gpio
@@ -222,10 +215,12 @@ switch:
       then:
         - lambda: |
             id(tm1637_display).set_inverted(true);
+        - component.update: tm1637_display
     on_turn_off:
       then:
         - lambda: |
             id(tm1637_display).set_inverted(false);
+        - component.update: tm1637_display
   - platform: template
     name: Display Intensity Auto
     id: auto_brightness_switch
@@ -256,13 +251,40 @@ script:
   - id: rotary_click
     mode: queued
     then:
-      - output.set_level:
-          id: rtttl_out
-          level: "100%"
-      - output.turn_on: rtttl_out
-      - delay: 1ms
-      - output.turn_off: rtttl_out
-      - delay: 1ms
+      - if: 
+          condition: rtttl.is_playing
+          else:
+            - output.set_level:
+                id: rtttl_out
+                level: "100%"
+            - output.turn_on: rtttl_out
+            - delay: 1ms
+            - output.turn_off: rtttl_out
+            - delay: 1ms
+  - id: tick_sound
+    mode: single
+    then: 
+      - if: 
+          condition: rtttl.is_playing
+          else:
+            - lambda: |
+                auto&& output = *id(rtttl_out);
+                output.write_state(1);
+                output.turn_on();
+                output.call();
+
+                delayMicroseconds(900);
+
+                output.turn_off();
+                output.call();
+            - delay: 1ms
+            # - output.set_level: 
+            #     id: rtttl_out
+            #     level: "100%"
+            # - output.turn_on: rtttl_out
+            # - delay: 1ms
+            # - output.turn_off: rtttl_out
+
 
 sensor:
   - platform: rotary_encoder
@@ -337,8 +359,6 @@ sensor:
           max_value: 7
           min_value: 0
       - delta: 0.1% # to prevent publishing non-changed values
-      - lambda: "return x + 1;"
-          
 
     on_value:
       then:
@@ -497,8 +517,8 @@ number:
   - platform: template
     id: display_intensity_number
     name: Display Intensity
-    max_value: 8
-    min_value: 0
+    max_value: 7
+    min_value: -1
     step: 1
     update_interval: 1s
     optimistic: True
@@ -506,8 +526,9 @@ number:
     on_value:
       then:
         - lambda: |
-            id(tm1637_display).set_on(int(x) != 0);
-            id(tm1637_display).set_intensity(max(1, int(x)) - 1);
+            id(tm1637_display).set_on(int(x) != -1);
+            id(tm1637_display).set_intensity(max(0, int(x)));
+            id(tm1637_display).update();
   - platform: template
     name: Sound Gain
     max_value: 100
@@ -526,7 +547,7 @@ display:
   dio_pin: ${display_dio_pin}
   inverted: false
   length: 4
-  update_interval: 500ms
+  update_interval: never
   intensity: 7
   lambda: |-
     if(id(menu_active)) {
@@ -534,9 +555,7 @@ display:
       return;
     }
 
-    static int i = 0;
-    i++;
-    if ((i % 2) == 0)
+    if (id(semicolon_on))
       it.strftime("%H.%M", id(sntp_time).now());
     else {
       it.strftime("%H%M", id(sntp_time).now());
