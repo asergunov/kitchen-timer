@@ -31,6 +31,8 @@ esphome:
   platformio_options:
     board_build.f_cpu: 80000000L
     lib_ldf_mode: "chain+"
+    extra_scripts: 
+      - pre:../../../extra_script.py
   on_boot:
     priority: 1000
     then:
@@ -124,7 +126,7 @@ esp32:
 
 # Enable logging
 logger:
-  level: WARN
+  level: DEBUG
 
 # debug:
 #   update_interval: 10s
@@ -227,6 +229,11 @@ switch:
         - number.set: 
             id: display_intensity_number
             value: !lambda return id(desired_display_intensity).state;
+  - platform: template
+    id: ticking_switch
+    name: Tick Sound
+    optimistic: True
+    restore_mode: RESTORE_DEFAULT_OFF
 
 output:
   - platform: ledc
@@ -260,26 +267,30 @@ script:
   - id: tick_sound
     mode: single
     then: 
-      - if: 
-          condition: rtttl.is_playing
-          else:
-            - lambda: |
-                auto&& output = *id(rtttl_out);
-                output.write_state(1);
-                output.turn_on();
-                output.call();
+      - if:
+          condition: 
+          - switch.is_on: ticking_switch
+          then:
+            - if: 
+                condition: rtttl.is_playing
+                else:
+                  - lambda: |
+                      auto&& output = *id(rtttl_out);
+                      output.write_state(1);
+                      output.turn_on();
+                      output.call();
 
-                delayMicroseconds(900);
+                      delayMicroseconds(900);
 
-                output.turn_off();
-                output.call();
-            - delay: 1ms
-            # - output.set_level: 
-            #     id: rtttl_out
-            #     level: "100%"
-            # - output.turn_on: rtttl_out
-            # - delay: 1ms
-            # - output.turn_off: rtttl_out
+                      output.turn_off();
+                      output.call();
+                  - delay: 1ms
+                  # - output.set_level: 
+                  #     id: rtttl_out
+                  #     level: "100%"
+                  # - output.turn_on: rtttl_out
+                  # - delay: 1ms
+                  # - output.turn_off: rtttl_out
 
 
 sensor:
