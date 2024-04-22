@@ -3,6 +3,9 @@ external_components:
     components:
       - tm1637
     refresh: 0s
+  - source: ./components
+    components:
+      - daily_signal
 
 substitutions:
   display_clk_pin: "9"
@@ -36,14 +39,7 @@ esphome:
           setenv("TZ", "${timezone}", 1);
           tzset();
       - lambda: |
-          const auto& _songs = id(songs);
-          std::vector<std::string> names;
-          names.reserve(_songs.size());
-          for(const auto& tune : _songs) {
-            const auto semicolon_index = std::find(std::begin(tune), std::end(tune), ':');
-            names.push_back({std::begin(tune), semicolon_index});
-          }
-
+          const auto& names = get_song_name_list(id(songs));
           for(auto&& select: {id(signal_1_sound), signal_2_sound}) {
             select->traits.set_options(names);
           }
@@ -168,7 +164,7 @@ deep_sleep:
 
 wifi:
   id: wifi_component
-  # power_save_mode: HIGH
+  power_save_mode: HIGH
   # enable_on_boot: False
   # fast_connect: True
   networks:
@@ -552,6 +548,12 @@ display:
   lambda: |-
     if(id(menu_active)) {
       it.print(0, id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
+      return;
+    }
+
+    auto && wifi = id(wifi_component);
+    if(!wifi->is_disabled() && !wifi->is_connected()) {
+      it.print("WiFi");
       return;
     }
 
