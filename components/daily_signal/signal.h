@@ -4,35 +4,54 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/core/time.h"
+#include <cstddef>
+#include <sys/_stdint.h>
 
 namespace esphome {
 namespace daily_signal {
 
 class SignalComponent;
 
-class SignalTrigger : public time::CronTrigger {
+struct CronRTCData {
+  optional<ESPTime> last_check;
+};
+
+class CronTrigger : public time::CronTrigger {
 public:
-  SignalTrigger(time::RealTimeClock *time_source);
-  void set_time_string(const std::string &time_string);
-  const std::string &get_time_signal() const { return _time_string; }
+  CronTrigger(time::RealTimeClock *time_source);
+  void loop() override;
 
 protected:
-  std::string _time_string;
+  CronRTCData &rtcData_;
+};
+
+class Timer : public CronTrigger {
+public:
+  Timer(time::RealTimeClock *rtc) : CronTrigger(rtc) {}
+  void start(const esphome::ESPTime& time);
+};
+
+class SignalTrigger : public CronTrigger {
+public:
+  SignalTrigger(time::RealTimeClock *rtc) : CronTrigger(rtc) {}
+  bool set_signal_time(uint8_t hour, uint8_t minute);
+  void unset_signal_time();
+protected:
 };
 
 class SignalComponent : public Component {
 public:
-  void set_time_signal(const std::string &time_string);
-  std::string get_time_signal() const {
-    if (!_trigger)
-      return {};
-    return _trigger->get_time_signal();
+  bool set_signal_time(const std::string &time_string);
+  const std::string &get_signal_time_string() const { return time_string_; }
+  void set_trigger(SignalTrigger *trigger) {
+    trigger_ = trigger;
+    set_signal_time(time_string_);
   }
-  void set_trigger(SignalTrigger *trigger) { _trigger = trigger; }
   void set_time(time::RealTimeClock *clock) { _clock = clock; }
 
-private:
-  SignalTrigger *_trigger = nullptr;
+protected:
+  std::string time_string_;
+  SignalTrigger *trigger_ = nullptr;
   time::RealTimeClock *_clock = nullptr;
 };
 
