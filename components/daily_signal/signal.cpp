@@ -45,8 +45,7 @@ bool SignalTrigger::set_signal_time(uint8_t hour, uint8_t minute) {
 
   this->hours_.reset();
   this->minutes_.reset();
-  ESP_LOGI(TAG, "Time parsed. Setting %d hours and %d minutes", tm.tm_hour,
-           tm.tm_min);
+  ESP_LOGI(TAG, "Time parsed. Setting %d hours and %d minutes", hour, minute);
   this->add_hour(hour);
   this->add_minute(minute);
   last_check_ = {};
