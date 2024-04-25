@@ -118,6 +118,7 @@ esp32:
   framework:
     type: esp-idf
     version: latest # recommended
+    platform_version: 6.6.0
     sdkconfig_options:
       # COMPILER_OPTIMIZATION_SIZE: y
       # CONFIG_COMPILER_OPTIMIZATION_PERF: y
