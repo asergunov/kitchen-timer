@@ -1,6 +1,7 @@
 #include "signal.h"
 #include "esp_attr.h"
 #include "esphome/components/time/automation.h"
+#include "esphome/core/log.h"
 #include <array>
 #include <cstddef>
 

@@ -6,6 +6,7 @@ external_components:
   - source: ./components
     components:
       - daily_signal
+      - timer
 
 substitutions:
   display_clk_pin: "9"
@@ -42,9 +43,11 @@ esphome:
           tzset();
       - lambda: |
           const auto& names = get_song_name_list(id(songs));
-          for(auto&& select: {id(signal_1_sound), signal_2_sound}) {
+          for(auto&& select: {id(signal_1_sound), id(signal_2_sound), id(timer_1_sound), id(timer_2_sound)}) {
             select->traits.set_options(names);
           }
+      - lambda: |
+          // App.set_loop_interval(2000);
 
 globals:
   - id: menu_active
@@ -127,7 +130,7 @@ esp32:
 
 # Enable logging
 logger:
-  level: DEBUG
+  level: WARN # DEBUG
 
 # debug:
 #   update_interval: 10s
@@ -157,6 +160,14 @@ packages:
       index: 1
   signal2: !include 
     file: .kitchen-timer_signal.yaml
+    vars:
+      index: 2
+  timer1: !include 
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 1
+  timer2: !include 
+    file: .kitchen-timer_timer.yaml
     vars:
       index: 2
 

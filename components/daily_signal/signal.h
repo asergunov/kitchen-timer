@@ -1,16 +1,15 @@
 #pragma once
 
-#include "esphome/components/time/automation.h"
 #include "esphome/core/component.h"
-#include "esphome/core/log.h"
 #include "esphome/core/time.h"
+#include "esphome/components/time/automation.h"
+
 #include <cstddef>
-#include <sys/_stdint.h>
+#include <string>
+
 
 namespace esphome {
 namespace daily_signal {
-
-class SignalComponent;
 
 struct CronRTCData {
   optional<ESPTime> last_check;
@@ -25,18 +24,11 @@ protected:
   CronRTCData &rtcData_;
 };
 
-class Timer : public CronTrigger {
-public:
-  Timer(time::RealTimeClock *rtc) : CronTrigger(rtc) {}
-  void start(const esphome::ESPTime& time);
-};
-
 class SignalTrigger : public CronTrigger {
 public:
   SignalTrigger(time::RealTimeClock *rtc) : CronTrigger(rtc) {}
   bool set_signal_time(uint8_t hour, uint8_t minute);
   void unset_signal_time();
-protected:
 };
 
 class SignalComponent : public Component {
