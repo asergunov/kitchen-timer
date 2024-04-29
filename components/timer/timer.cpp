@@ -2,21 +2,36 @@
 
 #include "esphome/core/log.h"
 
+#include "esp_sleep.h"
+
 #include <array>
 #include <initializer_list>
+#include <mutex>
 
 namespace esphome {
 namespace timer {
 
+std::once_flag g_powerDomainConfigFlag;
+
 static const char *const TAG = "timer";
 
-// RTC_DATA_ATTR std::array<optional<ESPTime>, 16> g_timerRtcData;
-// size_t g_nextFreeTimerRtcData = 0;
+constexpr uint8_t g_maxTimers = 16;
+bool RTC_DATA_ATTR g_timerRtcData_active[g_maxTimers];
+time_t RTC_DATA_ATTR g_timerRtcData_timestamp[g_maxTimers];
+uint8_t g_nextFreeTimerRtcData = 0;
 
 TimerTrigger::TimerTrigger(time::RealTimeClock *rtc)
-    : rtc_(rtc)
-//, signal_time_(g_timerRtcData[g_nextFreeTimerRtcData++])
-{
+    : rtc_(rtc), active_(g_timerRtcData_active[g_nextFreeTimerRtcData]),
+      timestamp_(g_timerRtcData_timestamp[g_nextFreeTimerRtcData]) {
+  if(g_nextFreeTimerRtcData++ == g_maxTimers) {
+    ESP_LOGE(TAG, "g_maxTimers exceed. Aborting.");
+    abort();
+  }
+  std::call_once(g_powerDomainConfigFlag, []() {
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+  });
+
   schedule();
 }
 
@@ -24,23 +39,25 @@ void TimerTrigger::start(TimerTrigger::seconds_type seconds) {
   ESP_LOGI(TAG, "Starting a trigger for %u seconds", seconds);
   const auto &now = rtc_->now();
   if (seconds <= 0) {
-    signal_time_ = {};
+    active_ = false;
   } else {
-    signal_time_ = ESPTime::from_epoch_local(now.timestamp + seconds);
-    ESP_LOGD(TAG, "Signal time is %s",
-             signal_time_->strftime("%H:%M:%S").c_str());
+    active_ = true;
+    timestamp_ = time_t(now.timestamp + seconds);
+    ESP_LOGD(
+        TAG, "Signal time is %s",
+        ESPTime::from_epoch_local(signal_time_)->strftime("%H:%M:%S").c_str());
   }
   schedule();
 }
 
 optional<TimerTrigger::seconds_type> TimerTrigger::get_seconds_remain() const {
   ESP_LOGD(TAG, "Calculating seconds remain");
-  if (!signal_time_) {
+  if (!active_) {
     return {};
   }
   const auto &now = rtc_->now();
-  if (signal_time_->timestamp > now.timestamp) {
-    return signal_time_->timestamp - now.timestamp;
+  if (timestamp_ > now.timestamp) {
+    return timestamp_ - now.timestamp;
   }
   return 0;
 }
@@ -48,31 +65,31 @@ optional<TimerTrigger::seconds_type> TimerTrigger::get_seconds_remain() const {
 void TimerTrigger::schedule() {
   ESP_LOGD(TAG, "Scheduling the beep");
   static const std::string timeName = "timer_timer";
-  if (!signal_time_) {
+  if (!active_) {
     ESP_LOGD(TAG, "Canceling timeout %s", timeName.c_str());
     cancel_timeout(timeName);
   } else {
     const auto &now = rtc_->now();
-    const auto seconds = signal_time_->timestamp > now.timestamp
-                             ? signal_time_->timestamp - now.timestamp
-                             : 0;
+    const auto seconds =
+        timestamp_ > now.timestamp ? timestamp_ - now.timestamp : 0;
     ESP_LOGD(TAG, "Setting timeout %s to %d seconds", timeName.c_str(),
              seconds);
     set_timeout(timeName, seconds * 1000, [this] {
       ESP_LOGD(TAG, "Triggering");
       this->trigger();
-      signal_time_ = {};
+      active_ = false;
     });
   }
 }
 
 bool TimerComponent::start(const std::string &time_string) {
+  if (!trigger_) {
+    return false;
+  }
   ESP_LOGD(TAG, "Staring by string %s", time_string.c_str());
   if (time_string.empty()) {
-    if (trigger_)
-      trigger_->start(0);
+    trigger_->start(0);
     ESP_LOGI(TAG, "Empty line. Cleaning up.");
-    time_string_ = time_string;
     return true;
   }
 
@@ -98,10 +115,8 @@ bool TimerComponent::start(const std::string &time_string) {
   ESP_LOGD(TAG, "After parsing tm is %dh %dm %ds", tm.tm_hour, tm.tm_min,
            tm.tm_sec);
 
-  if (trigger_)
-    trigger_->start((tm.tm_hour * 60 + tm.tm_min) * 60 + tm.tm_sec);
+  trigger_->start((tm.tm_hour * 60 + tm.tm_min) * 60 + tm.tm_sec);
 
-  time_string_ = time_string;
   return true;
 }
 
@@ -114,7 +129,6 @@ void TimerComponent::start(TimerComponent::seconds_type seconds) {
 void TimerComponent::set_trigger(TimerTrigger *trigger) {
   ESP_LOGD(TAG, "Setting the trigger");
   trigger_ = trigger;
-  start(time_string_);
 }
 
 void TimerComponent::set_time(time::RealTimeClock *clock) {
@@ -127,7 +141,7 @@ TimerComponent::get_seconds_remain() const {
   ESP_LOGD(TAG, "Getting seconds remain");
   if (trigger_)
     return trigger_->get_seconds_remain();
-  return {};
+  return 0;
 }
 } // namespace timer
 } // namespace esphome

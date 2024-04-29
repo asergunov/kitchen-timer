@@ -5,34 +5,32 @@ esp32:
   framework:
     type: esp-idf
     version: recommended
-    # sdkconfig_options:
-  #     COMPILER_OPTIMIZATION_SIZE: y
-  #     CONFIG_COMPILER_OPTIMIZATION_PERF: y
-  #     CONFIG_PM_ENABLE: y
-  #     CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
-      # CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
-  #     CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y
-  #     CONFIG_PM_DFS_INIT_AUTO=y
-  #     CONFIG_PM_PROFILING=y
-  #     CONFIG_PM_TRACE=y
+    sdkconfig_options:
+      CONFIG_PM_ENABLE: y
+      # CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
+      # CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: y
+      # CONFIG_PM_USE_RTC_TIMER_REF: y
+      # CONFIG_PM_DFS_INIT_AUTO: y
 
 # Enable logging
 logger:
-  level: DEBUG
-
+  level: WARN # DEBUG
 
 external_components:
   - source: "github://asergunov/esphome_esphome@tm1637_off"
     components:
       - tm1637
     refresh: 0s
-  - source: "github://asergunov/esphome_esphome@template_text_fix"
+  - source: "github://asergunov/esphome_esphome@rtttl_pm"
+    components:
+      - rtttl
+    refresh: 0s
+  - source: "github://esphome/esphome@dev"
     components:
       - template
-    refresh: 0s
   - source: ./components
     components:
-      # - daily_signal
+      - daily_signal
       - timer
 
 substitutions:
@@ -50,6 +48,7 @@ substitutions:
   timezone: "<+06>-6"
   timer_list_sound: "id(timer_1_sound), id(timer_2_sound)"
   timer_list: "id(timer_1_timer), id(timer_2_timer)"
+  signal_list_sound: "id(signal_1_sound), id(signal_2_sound)"
 
 esphome:
   name: kitchen-timer
@@ -62,9 +61,9 @@ esphome:
     board_build.f_cpu: 80000000L
     debug_tool: esp-builtin
     lib_ldf_mode: "chain+"
-    build_type: debug
-    board_build.flash_mode: dio
-    # extra_scripts: 
+    # build_type: debug
+    # board_build.flash_mode: dio
+    # extra_scripts:
     #   - pre:../../../extra_script.py
   on_boot:
     priority: 1000
@@ -76,14 +75,14 @@ esphome:
       - lambda: |
           const auto& names = get_song_name_list(id(songs));
           for(auto&& select: {
-          //  id(signal_1_sound), id(signal_2_sound), 
+            ${signal_list_sound}, 
             ${timer_list_sound}
           }) {
             select->traits.set_options(names);
             select->set_initial_option(names[0]);
           }
       - lambda: |
-          // App.set_loop_interval(2000);
+          // App.set_loop_interval(500);
 
 globals:
   - id: menu_active
@@ -113,7 +112,7 @@ globals:
         "SkippyTh:d=4,o=5,b=112:16f,16g,16a,a#,32p,16d,8c,p,16f,16a#,16a#,16a#,16a#,16p,16d,c,32p,16f,16a#,16a#,16a#,8a#,16d,16c,16p,16d,16d#,16p,16c,16d,8p,8f,16p,f.",
         "BevHills:d=4,o=5,b=160:f#,8a.,8f#,16f#,8a#,8f#,8e,f#,8c.6,8f#,16f#,8d6,8c#6,8a,8f#,8c#6,8f#6,16f#,8e,16e,8c#,8g#,f#.",
         "Elec6:d=16,o=5,b=180:8d.,p,d,p,f,p,g,p,f,p,32d,p.,32c#,p.,8c.,p,32c,p.,8a.4,p,32c,p.,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c",
-        "MontyPyton:d=4,o=5,b=200:32p,f6,8e6,d6,8c#6,c6,8b,a#,8a,8g,8a,8a#,a,8g,2c6,8p,8c6,8a,8p,8a,8a,8g#,8a,8f6,8p,8c6,8c6,8p,8a,8a#,8p,8a#,8a#,8p,8c6,2d6,8p,8a#,8g,8p,8g,8g,8f#,8g,8e6,8p,8d6,8d6,8p,8a#,8a,8p,8a,8a,8p,8a#,2c6,8p,8c6",
+        "MontyPython:d=4,o=5,b=200:32p,f6,8e6,d6,8c#6,c6,8b,a#,8a,8g,8a,8a#,a,8g,2c6,8p,8c6,8a,8p,8a,8a,8g#,8a,8f6,8p,8c6,8c6,8p,8a,8a#,8p,8a#,8a#,8p,8c6,2d6,8p,8a#,8g,8p,8g,8g,8f#,8g,8e6,8p,8d6,8d6,8p,8a#,8a,8p,8a,8a,8p,8a#,2c6,8p,8c6",
         "PiratesTheme:d=4,o=6,b=200:8d,8e,2f,8g,8a,g,f,e,f,g,a,g,p,8f,8g,a,p,8g,8f,e,f,e,d,p,8e,8c,d,8p,p,8d,8e,f,p,8e,8f,g,f,g,a,g,f,d",
         "Twilight:d=16,o=7,b=285:a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,b5,c#6,b5,c#6,b5,c#6,b5,c#6,b5,c#6,b5,d6,a#5,d6,a#5,d#6,a5,2p.,g6,a#6,d#,e,c#,e,d#,a#6,g#6,a#6,e,g#,e,a#",
         "XFiles1:d=4,o=5,b=125:e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,g6,f#6,e6,d6,e6,2b.,1p,g6,f#6,e6,d6,f#6,2b.,1p,e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,e6,2b.",
@@ -171,20 +170,20 @@ ota:
   #         id(tm1637_display).printf("%2.1f%", x);
   #         id(tm1637_display).update();
 
-packages: 
-#   signal1: !include 
-#     file: .kitchen-timer_signal.yaml
-#     vars:
-#       index: 1
-#   signal2: !include 
-#     file: .kitchen-timer_signal.yaml
-#     vars:
-#       index: 2
-  timer1: !include 
+packages:
+  signal1: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 1
+  signal2: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 2
+  timer1: !include
     file: .kitchen-timer_timer.yaml
     vars:
       index: 1
-  timer2: !include 
+  timer2: !include
     file: .kitchen-timer_timer.yaml
     vars:
       index: 2
@@ -219,7 +218,7 @@ time:
   - platform: sntp
     id: sntp_time
     timezone: ${timezone}
-    on_time: 
+    on_time:
       seconds: /1
       minutes: /1
       then:
@@ -254,9 +253,9 @@ switch:
     id: auto_brightness_switch
     optimistic: True
     restore_mode: RESTORE_DEFAULT_ON
-    on_turn_on: 
+    on_turn_on:
       then:
-        - number.set: 
+        - number.set:
             id: display_intensity_number
             value: !lambda return id(desired_display_intensity).state;
   - platform: template
@@ -268,7 +267,7 @@ switch:
 output:
   - platform: ledc
     id: rtttl_out
-    pin: 
+    pin:
       number: ${passive_buzzer_pin}
       inverted: False
 
@@ -284,7 +283,7 @@ script:
   - id: rotary_click
     mode: queued
     then:
-      - if: 
+      - if:
           condition: rtttl.is_playing
           else:
             - output.set_level:
@@ -296,12 +295,12 @@ script:
             - delay: 1ms
   - id: tick_sound
     mode: single
-    then: 
+    then:
       - if:
-          condition: 
-          - switch.is_on: ticking_switch
+          condition:
+            - switch.is_on: ticking_switch
           then:
-            - if: 
+            - if:
                 condition: rtttl.is_playing
                 else:
                   - lambda: |
@@ -315,13 +314,12 @@ script:
                       output.turn_off();
                       output.call();
                   - delay: 1ms
-                  # - output.set_level: 
+                  # - output.set_level:
                   #     id: rtttl_out
                   #     level: "100%"
                   # - output.turn_on: rtttl_out
                   # - delay: 1ms
                   # - output.turn_off: rtttl_out
-
 
 sensor:
   - platform: rotary_encoder
@@ -403,7 +401,7 @@ sensor:
             condition:
               - switch.is_on: auto_brightness_switch
             then:
-              - number.set: 
+              - number.set:
                   id: display_intensity_number
                   value: !lambda return x;
 
@@ -473,7 +471,7 @@ sensor:
     attenuation: auto
     unit_of_measurement: mA
     update_interval: 5s
-    filters: 
+    filters:
       - lambda: |
           if(id(charging_sensor).state)
             return x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/;
@@ -522,8 +520,7 @@ text:
     optimistic: true
     mode: text
     restore_value: True
-    initial_value: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'
-
+    initial_value: "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e"
 
 button:
   - platform: restart
@@ -572,7 +569,7 @@ number:
     min_value: -100
     step: 1
     optimistic: True
-    on_value: 
+    on_value:
       then:
         - lambda: |
             id(my_rtttl).set_gain(0.01*x);
@@ -595,9 +592,12 @@ display:
     optional<uint32_t> smallest_timer;
     for(const auto& timer : {${timer_list}}) {
       const auto& remain = timer->get_seconds_remain();
-      if(!remain) continue;
-      if(!smallest_timer) { smallest_timer = remain;
-      continue;
+      if(!remain) {
+        continue;
+      }
+      if(!smallest_timer) {
+        smallest_timer = remain;
+        continue;
       }
 
       smallest_timer = std::min(*smallest_timer, *remain);

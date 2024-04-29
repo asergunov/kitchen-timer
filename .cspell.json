@@ -1,0 +1,18 @@
+{
+    "language": "en,ru",
+    "words": [
+        "asergunov",
+        "esp32-c3-devkitm-1",
+        "esphome",
+        "gpio",
+        "platformio",
+        "rtttl",
+        "sdkconfig",
+        "strftime",
+        "TICKLESS",
+        "wakeup"
+    ],
+    "ignoreRegExpList": [
+        "ESP_LOG[IWD]"
+    ]
+}

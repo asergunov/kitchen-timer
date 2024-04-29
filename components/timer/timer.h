@@ -22,7 +22,8 @@ protected:
 
 protected:
   time::RealTimeClock *rtc_;
-  optional<ESPTime> signal_time_;
+  bool& active_;
+  time_t& timestamp_;
 };
 
 class TimerComponent : public Component {
@@ -35,7 +36,6 @@ public:
   optional<seconds_type> get_seconds_remain() const;
 
 protected:
-  std::string time_string_;
   TimerTrigger *trigger_ = nullptr;
   time::RealTimeClock *_clock = nullptr;
 };

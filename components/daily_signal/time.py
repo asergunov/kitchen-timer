@@ -7,7 +7,8 @@ from esphome import automation
 
 daily_signal_ns = cg.esphome_ns.namespace("daily_signal")
 SignalComponent = daily_signal_ns.class_("SignalComponent", cg.Component)
-SignalTrigger = daily_signal_ns.class_("SignalTrigger", automation.Trigger.template(), time_.CronTrigger)
+CronTrigger = daily_signal_ns.class_("CronTrigger", automation.Trigger.template(), time_.CronTrigger)
+SignalTrigger = daily_signal_ns.class_("SignalTrigger", CronTrigger)
 
 CONF_SIGNAL_TIME = "time"
 CONF_SIGNAL_CLOCK = "clock"
