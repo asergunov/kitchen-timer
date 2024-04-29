@@ -6,12 +6,9 @@
 
 #include <array>
 #include <initializer_list>
-#include <mutex>
 
 namespace esphome {
 namespace timer {
-
-std::once_flag g_powerDomainConfigFlag;
 
 static const char *const TAG = "timer";
 
@@ -27,10 +24,6 @@ TimerTrigger::TimerTrigger(time::RealTimeClock *rtc)
     ESP_LOGE(TAG, "g_maxTimers exceed. Aborting.");
     abort();
   }
-  std::call_once(g_powerDomainConfigFlag, []() {
-    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
-  });
 
   schedule();
 }
