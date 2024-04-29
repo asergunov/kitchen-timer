@@ -6,6 +6,7 @@
         "esphome",
         "gpio",
         "platformio",
+        "pullup",
         "rtttl",
         "sdkconfig",
         "strftime",

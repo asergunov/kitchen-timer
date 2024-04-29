@@ -17,13 +17,19 @@ logger:
   level: WARN # DEBUG
 
 external_components:
-  - source: "github://asergunov/esphome_esphome@tm1637_off"
-    components:
-      - tm1637
-    refresh: 0s
+  # - source: "github://asergunov/esphome_esphome@tm1637_off"
+  #   components:
+  #     - tm1637
+  #   refresh: 0s
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
     components:
       - rtttl
+    refresh: 0s
+  - source: "github://asergunov/esphome_esphome@7digits_display_menu"
+    components:
+      - tm1637
+      - lcd_menu_7segment
+      - display_7segment_base
     refresh: 0s
   - source: "github://esphome/esphome@dev"
     components:
@@ -164,11 +170,6 @@ ota:
   on_error:
     then:
       - switch.turn_on: power_saving
-  # on_progress:
-  #   then:
-  #     - lambda: |
-  #         id(tm1637_display).printf("%2.1f%", x);
-  #         id(tm1637_display).update();
 
 packages:
   signal1: !include
@@ -237,6 +238,7 @@ switch:
   - platform: template
     optimistic: True
     name: Display Flip
+    id: display_flip
     restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
       then:
@@ -331,23 +333,39 @@ sensor:
     pin_b:
       inverted: True
       number: ${rotary_encoder_b_pin}
+    on_anticlockwise:
+      - if:
+          condition:
+            display_menu.is_active:
+          then:
+            - display_menu.down:
+          else:
+            - display_menu.show_main:
+    on_clockwise:
+      - if:
+          condition:
+            display_menu.is_active:
+          then:
+            - display_menu.up:
+          else:
+            - display_menu.show_main:
     on_value:
       then:
-        - lambda: |
-            if(id(menu_active)) {
-              id(enable_sleeping) = !id(enable_sleeping);
-              if(enable_sleeping) {
-              //   id(wifi_component).disable();
-                id(deep_sleep_component).allow_deep_sleep();
-              } else {
-              //   id(wifi_component).enable();
-              //   id(wifi_component).retry_connect();
-                id(deep_sleep_component).prevent_deep_sleep();
-              }
+        # - lambda: |
+        #     if(id(menu_active)) {
+        #       id(enable_sleeping) = !id(enable_sleeping);
+        #       if(enable_sleeping) {
+        #       //   id(wifi_component).disable();
+        #         id(deep_sleep_component).allow_deep_sleep();
+        #       } else {
+        #       //   id(wifi_component).enable();
+        #       //   id(wifi_component).retry_connect();
+        #         id(deep_sleep_component).prevent_deep_sleep();
+        #       }
 
               
-              id(tm1637_display).update();
-            }
+        #       id(tm1637_display).update();
+        #     }
         - script.execute: rotary_click
 
   - platform: veml7700
@@ -486,9 +504,18 @@ binary_sensor:
       inverted: True
     on_click:
       then:
-        - lambda: |
-            id(menu_active) = !id(menu_active);
-            id(tm1637_display).update();
+        - if:
+            condition:
+              display_menu.is_active:
+            then:
+              - display_menu.enter:
+            else:
+              - display_menu.show_main:
+    on_multi_click:
+      - timing:
+          - ON for at least 2s
+        then:
+          - display_menu.hide
   - platform: gpio
     name: Power Charging
     id: charging_sensor
@@ -560,7 +587,7 @@ number:
     on_value:
       then:
         - lambda: |
-            id(tm1637_display).set_on(int(x) != -1);
+            // id(tm1637_display).set_on(int(x) != -1);
             id(tm1637_display).set_intensity(max(0, int(x)));
             id(tm1637_display).update();
   - platform: template
@@ -574,6 +601,40 @@ number:
         - lambda: |
             id(my_rtttl).set_gain(0.01*x);
 
+lcd_menu_7segment:
+  id: main_menu
+  mode: rotary
+  active: false
+  items:
+    - type: switch
+      text: 'Auto'
+      immediate_edit: false
+      on_text: 'On'
+      off_text: 'Off'
+      switch: auto_brightness_switch
+    - type: number
+      text: 'Brig'
+      immediate_edit: false
+      format: '%4.0f'
+      number: display_intensity_number
+    - type: switch
+      text: 'Flip'
+      immediate_edit: false
+      on_text: 'Flip'
+      off_text: 'Flip'
+      switch: display_flip
+    - type: switch
+      text: Tick
+      on_text: 'On'
+      off_text: 'Off'
+      switch: ticking_switch
+    - type: command
+      text: 'back'
+      on_value:
+        then:
+          - display_menu.hide:
+          - component.update: tm1637_display
+
 display:
   platform: tm1637
   id: tm1637_display
@@ -584,8 +645,13 @@ display:
   update_interval: never
   intensity: 7
   lambda: |-
+    if (id(main_menu).is_active()) {
+      id(main_menu).draw();
+      return;
+    }
+
     if(id(menu_active)) {
-      it.print(0, id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
+      it.print(id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
       return;
     }
 

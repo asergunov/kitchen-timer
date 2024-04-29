@@ -21,6 +21,12 @@ CronTrigger::CronTrigger(time::RealTimeClock *time_source)
  , rtcData_(g_rtcData[g_nextFreeRtcData++])
 {
   ESP_LOGD(TAG, "Creating cron trigger");
+
+  if(g_nextFreeRtcData >= g_rtcData.size()) {
+    ESP_LOGE(TAG, "g_rtcData too small");
+    abort();
+  }
+
   last_check_ = rtcData_.last_check;
 
   add_second(0);
