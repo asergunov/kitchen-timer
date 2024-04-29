@@ -1,3 +1,4 @@
+#include <cstdint>
 std::vector<std::string> get_song_name_list(const std::vector<std::string>& _songs)
 {
     std::vector<std::string> names;

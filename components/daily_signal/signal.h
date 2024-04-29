@@ -21,7 +21,7 @@ public:
   void loop() override;
 
 protected:
-  CronRTCData &rtcData_;
+  CronRTCData rtcData_;
 };
 
 class SignalTrigger : public CronTrigger {
@@ -35,11 +35,8 @@ class SignalComponent : public Component {
 public:
   bool set_signal_time(const std::string &time_string);
   const std::string &get_signal_time_string() const { return time_string_; }
-  void set_trigger(SignalTrigger *trigger) {
-    trigger_ = trigger;
-    set_signal_time(time_string_);
-  }
-  void set_time(time::RealTimeClock *clock) { _clock = clock; }
+  void set_trigger(SignalTrigger *trigger);
+  void set_time(time::RealTimeClock *clock);
 
 protected:
   std::string time_string_;

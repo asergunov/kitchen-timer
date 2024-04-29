@@ -1,17 +1,44 @@
+esp32:
+  board: esp32-c3-devkitm-1
+  # framework:
+  #   type: arduino
+  framework:
+    type: esp-idf
+    version: recommended
+    # sdkconfig_options:
+  #     COMPILER_OPTIMIZATION_SIZE: y
+  #     CONFIG_COMPILER_OPTIMIZATION_PERF: y
+  #     CONFIG_PM_ENABLE: y
+  #     CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
+      # CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
+  #     CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y
+  #     CONFIG_PM_DFS_INIT_AUTO=y
+  #     CONFIG_PM_PROFILING=y
+  #     CONFIG_PM_TRACE=y
+
+# Enable logging
+logger:
+  level: DEBUG
+
+
 external_components:
   - source: "github://asergunov/esphome_esphome@tm1637_off"
     components:
       - tm1637
     refresh: 0s
+  - source: "github://asergunov/esphome_esphome@template_text_fix"
+    components:
+      - template
+    refresh: 0s
   - source: ./components
     components:
-      - daily_signal
+      # - daily_signal
       - timer
 
 substitutions:
-  display_clk_pin: "9"
+  display_clk_pin: "21"
   display_dio_pin: "10"
-  power_sawing_pin: "8"
+  power_sawing_pin: "20"
   passive_buzzer_pin: "6"
   charging_current_pin: "3"
   rotary_encoder_a_pin: "7"
@@ -21,6 +48,8 @@ substitutions:
   charging_pin: "5"
   fully_charged_pin: "0"
   timezone: "<+06>-6"
+  timer_list_sound: "id(timer_1_sound), id(timer_2_sound)"
+  timer_list: "id(timer_1_timer), id(timer_2_timer)"
 
 esphome:
   name: kitchen-timer
@@ -31,9 +60,12 @@ esphome:
     - kitchen-timer.h
   platformio_options:
     board_build.f_cpu: 80000000L
+    debug_tool: esp-builtin
     lib_ldf_mode: "chain+"
-    extra_scripts: 
-      - pre:../../../extra_script.py
+    build_type: debug
+    board_build.flash_mode: dio
+    # extra_scripts: 
+    #   - pre:../../../extra_script.py
   on_boot:
     priority: 1000
     then:
@@ -43,8 +75,12 @@ esphome:
           tzset();
       - lambda: |
           const auto& names = get_song_name_list(id(songs));
-          for(auto&& select: {id(signal_1_sound), id(signal_2_sound), id(timer_1_sound), id(timer_2_sound)}) {
+          for(auto&& select: {
+          //  id(signal_1_sound), id(signal_2_sound), 
+            ${timer_list_sound}
+          }) {
             select->traits.set_options(names);
+            select->set_initial_option(names[0]);
           }
       - lambda: |
           // App.set_loop_interval(2000);
@@ -114,24 +150,6 @@ globals:
         "mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6",
       }
 
-esp32:
-  board: esp32-c3-devkitm-1
-  # framework:
-  #   type: arduino
-  framework:
-    type: esp-idf
-    version: recommended
-    sdkconfig_options:
-      # COMPILER_OPTIMIZATION_SIZE: y
-      # CONFIG_COMPILER_OPTIMIZATION_PERF: y
-      CONFIG_PM_ENABLE: y
-      CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
-      CONFIG_ESP32C3_RTC_CLK_SRC: ESP32C3_RTC_CLK_SRC_EXT_CRYS
-
-# Enable logging
-logger:
-  level: WARN # DEBUG
-
 # debug:
 #   update_interval: 10s
 
@@ -147,21 +165,21 @@ ota:
   on_error:
     then:
       - switch.turn_on: power_saving
-  on_progress:
-    then:
-      - lambda: |
-          id(tm1637_display).printf("%2.1f%", x);
-          id(tm1637_display).update();
+  # on_progress:
+  #   then:
+  #     - lambda: |
+  #         id(tm1637_display).printf("%2.1f%", x);
+  #         id(tm1637_display).update();
 
 packages: 
-  signal1: !include 
-    file: .kitchen-timer_signal.yaml
-    vars:
-      index: 1
-  signal2: !include 
-    file: .kitchen-timer_signal.yaml
-    vars:
-      index: 2
+#   signal1: !include 
+#     file: .kitchen-timer_signal.yaml
+#     vars:
+#       index: 1
+#   signal2: !include 
+#     file: .kitchen-timer_signal.yaml
+#     vars:
+#       index: 2
   timer1: !include 
     file: .kitchen-timer_timer.yaml
     vars:
@@ -259,8 +277,8 @@ rtttl:
   id: my_rtttl
 
 i2c:
-  - sda: 20
-    scl: 21
+  - sda: 8
+    scl: 9
 
 script:
   - id: rotary_click
@@ -571,6 +589,25 @@ display:
   lambda: |-
     if(id(menu_active)) {
       it.print(0, id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
+      return;
+    }
+
+    optional<uint32_t> smallest_timer;
+    for(const auto& timer : {${timer_list}}) {
+      const auto& remain = timer->get_seconds_remain();
+      if(!remain) continue;
+      if(!smallest_timer) { smallest_timer = remain;
+      continue;
+      }
+
+      smallest_timer = std::min(*smallest_timer, *remain);
+    }
+
+    if(smallest_timer) {
+      auto sec = *smallest_timer;
+      auto min = sec /60; 
+      sec = sec % 60;
+      it.printf("%02d.%02d", min, sec);
       return;
     }
 
