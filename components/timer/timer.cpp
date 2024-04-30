@@ -38,7 +38,7 @@ void TimerTrigger::start(TimerTrigger::seconds_type seconds) {
     timestamp_ = time_t(now.timestamp + seconds);
     ESP_LOGD(
         TAG, "Signal time is %s",
-        ESPTime::from_epoch_local(signal_time_)->strftime("%H:%M:%S").c_str());
+        ESPTime::from_epoch_local(timestamp_).strftime("%H:%M:%S").c_str());
   }
   schedule();
 }

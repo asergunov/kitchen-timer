@@ -91,9 +91,6 @@ esphome:
           // App.set_loop_interval(500);
 
 globals:
-  - id: menu_active
-    type: bool
-    initial_value: "false"
   - id: enable_sleeping
     type: bool
     initial_value: "false"
@@ -351,21 +348,6 @@ sensor:
             - display_menu.show_main:
     on_value:
       then:
-        # - lambda: |
-        #     if(id(menu_active)) {
-        #       id(enable_sleeping) = !id(enable_sleeping);
-        #       if(enable_sleeping) {
-        #       //   id(wifi_component).disable();
-        #         id(deep_sleep_component).allow_deep_sleep();
-        #       } else {
-        #       //   id(wifi_component).enable();
-        #       //   id(wifi_component).retry_connect();
-        #         id(deep_sleep_component).prevent_deep_sleep();
-        #       }
-
-              
-        #       id(tm1637_display).update();
-        #     }
         - script.execute: rotary_click
 
   - platform: veml7700
@@ -576,18 +558,40 @@ button:
 
 number:
   - platform: template
-    id: display_intensity_number
     name: Display Intensity
+    id: display_intensity
     max_value: 7
     min_value: -1
     step: 1
     update_interval: 1s
     optimistic: True
     restore_value: True
+    on_value: 
+      then:
+        - if:
+            condition: 
+              - number.in_range: 
+                  id: display_intensity
+                  below: 0
+            then:
+              - switch.turn_on: auto_brightness_switch
+            else:
+              - switch.turn_off: auto_brightness_switch
+              - number.set:
+                  id: display_intensity_number
+                  value: !lambda "return x;"
+  - platform: template
+    name: Raw Display Intensity
+    id: display_intensity_number
+    max_value: 7
+    min_value: -1
+    step: 1
+    update_interval: 1s
+    optimistic: True
     on_value:
       then:
         - lambda: |
-            // id(tm1637_display).set_on(int(x) != -1);
+            id(tm1637_display).set_on(int(x) != -1);
             id(tm1637_display).set_intensity(max(0, int(x)));
             id(tm1637_display).update();
   - platform: template
@@ -606,30 +610,33 @@ lcd_menu_7segment:
   mode: rotary
   active: false
   items:
-    - type: switch
-      text: 'Auto'
-      immediate_edit: false
-      on_text: 'On'
-      off_text: 'Off'
-      switch: auto_brightness_switch
     - type: number
-      text: 'Brig'
+      text: 'ЯРKOСТЬ'
       immediate_edit: false
-      format: '%4.0f'
-      number: display_intensity_number
+      value_lambda: |
+        std::string result = "Auto";
+        const auto& x = id(display_intensity).state;
+        if(x >= 0) {
+          result.clear();
+          for(int i = 0; i < 4; ++i) {
+            result.push_back('0'+x);
+          }
+        }
+        return result;
+      number: display_intensity
     - type: switch
-      text: 'Flip'
+      text: 'ПОВОРОТ'
       immediate_edit: false
-      on_text: 'Flip'
-      off_text: 'Flip'
+      on_text: '1234'
+      off_text: '1234'
       switch: display_flip
     - type: switch
-      text: Tick
+      text: ТИК
       on_text: 'On'
-      off_text: 'Off'
+      off_text: 'OFF'
       switch: ticking_switch
     - type: command
-      text: 'back'
+      text: НАЗАД
       on_value:
         then:
           - display_menu.hide:
@@ -647,11 +654,6 @@ display:
   lambda: |-
     if (id(main_menu).is_active()) {
       id(main_menu).draw();
-      return;
-    }
-
-    if(id(menu_active)) {
-      it.print(id(enable_sleeping) ? "Wb.OF" : "Wb.ON");
       return;
     }
 
@@ -679,7 +681,7 @@ display:
 
     auto && wifi = id(wifi_component);
     if(!wifi->is_disabled() && !wifi->is_connected()) {
-      it.print("WiFi");
+      it.print("WIFI");
       return;
     }
 

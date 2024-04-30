@@ -98,8 +98,8 @@ bool SignalComponent::set_signal_time(const std::string &time_string) {
     return false;
   }
 
-  ESP_LOGI(TAG, "Time parsed. Setting %d hours and %d minutes", tm.tm_hour,
-           parsed_time.tm_min);
+  ESP_LOGI(TAG, "Time parsed. Setting %d hours and %d minutes",
+           parsed_time.tm_hour, parsed_time.tm_min);
 
   if (trigger_ && !trigger_->set_signal_time(parsed_time.tm_hour, parsed_time.tm_min))
     return false;
