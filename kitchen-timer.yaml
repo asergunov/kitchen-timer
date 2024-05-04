@@ -313,6 +313,12 @@ script:
                   - delay: 1ms
                   - output.turn_off: rtttl_out
 
+  - id: auto_menu_exit
+    mode: restart
+    then:
+      - delay: 60s
+      - display_menu.hide:
+
 sensor:
   - platform: rotary_encoder
     id: encoder
@@ -324,6 +330,7 @@ sensor:
       inverted: True
       number: ${rotary_encoder_b_pin}
     on_anticlockwise:
+      - script.execute: auto_menu_exit
       - if:
           condition:
             display_menu.is_active:
@@ -332,6 +339,7 @@ sensor:
           else:
             - display_menu.show_main:
     on_clockwise:
+      - script.execute: auto_menu_exit
       - if:
           condition:
             display_menu.is_active:
@@ -479,6 +487,7 @@ binary_sensor:
       inverted: True
     on_click:
       then:
+        - script.execute: auto_menu_exit
         - if:
             condition:
               display_menu.is_active:
@@ -607,17 +616,16 @@ lcd_menu_7segment:
       text: "ТАйМЕР"
       items:
       - type: custom
-        text: "СТАРТ"
+        text: "НОВЫЙ"
         value_lambda: |
-          if(id(menu_recent_timer) < id(recent_timers).size())
-            return timer_value_string(id(recent_timers)[id(menu_recent_timer)]);
-          else
-            return timer_value_string(*menu_fibonacci_iterator);
-          return "НОВЫЙ";
+          return timer_value_string(
+            id(menu_recent_timer) < id(recent_timers).size() 
+              ? id(recent_timers)[id(menu_recent_timer)] 
+              : *menu_fibonacci_iterator);
         on_enter:
           then:
             lambda: |
-              id(menu_recent_timer) = id(recent_timers)[id(menu_recent_timer)] == 0 ? 0xff : 0;
+              id(menu_recent_timer) = 0xff;
               menu_fibonacci_iterator = TimerValueIterator{};
         # on_leave:
         on_next:
@@ -625,33 +633,29 @@ lcd_menu_7segment:
             lambda: |
               auto& i = id(menu_recent_timer);
               if(i == 0xff) {
-                ++menu_fibonacci_iterator;
+                if(menu_fibonacci_iterator == TimerValueIterator{}) {
+                  const auto& vec = id(recent_timers);
+                  if(vec.front() != 0) {
+                    i = 0;
+                  }
+                } else {
+                  --menu_fibonacci_iterator;
+                }
               } else {
                 const auto& vec = id(recent_timers);
                 auto next = id(menu_recent_timer) + 1;
                 if(next < vec.size() && vec[next] != 0) {
                   i = next;
-                } else {
-                  i = 0xff;
                 }
               }
-
         on_prev:
           then:
             lambda: |
-              const auto& vec = id(recent_timers);
-              if(id(menu_recent_timer) == 0xff) {
-                if(menu_fibonacci_iterator == TimerValueIterator{}) {
-                  auto i = std::find_if(
-                    vec.rbegin(),
-                    vec.rend(),
-                    [](const esphome::timer::seconds_type& item){ return item != 0; });
-                  if(i != vec.rend()) {
-                    id(menu_recent_timer) = std::distance(vec.begin(), i.base() - 1);
-                  }
-                } else {
-                  --menu_fibonacci_iterator;
-                }
+              if(id(menu_recent_timer) == 0) {
+                id(menu_recent_timer) = 0xff;
+              } else if(id(menu_recent_timer) == 0xff) {
+                if(*menu_fibonacci_iterator < 24*60*60)
+                  ++menu_fibonacci_iterator;
               } else if(id(menu_recent_timer) > 0) {
                 id(menu_recent_timer)--;
               }
