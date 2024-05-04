@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_attr.h"
+#include <cstdint>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -68,8 +69,6 @@ public:
 
   const T &operator*() const { return b_; }
 
-  const T *operator->() const { return &b_; }
-
   bool operator==(const FibonacciIterator &rhs) const { return b_ == rhs.b_; }
 
   bool operator!=(const FibonacciIterator &rhs) const { return b_ != rhs.b_; }
@@ -79,25 +78,41 @@ private:
   T b_ = 1;
 };
 
-template <typename T> class FibonacciSpeedIterator {
+template <typename T, typename S> class SpeedIterator {
+  void adjustMinSpeed() {
+    min_speed_ = S{};
+    constexpr std::array<T, 5> values = {60 * 60, 60 * 10, 60, 10, 1};
+    for (auto &&value : values) {
+      if (value_ > value) {
+        while (*min_speed_ < value)
+          ++min_speed_;
+        break;
+      }
+    }
+
+  }
   void adjustSpeed() {
+    adjustMinSpeed();
+    speed_ = min_speed_;
+    return;
+
     ++speed_;
+    while (*min_speed_ > *speed_) ++speed_;
     const auto dt = esphome::millis() - last_step_time_ms;
     last_step_time_ms += dt;
-
-    while (speed_ != min_speed_ && dt > 200) {
+    while (*speed_ > *min_speed_ && dt > 200) {
       --speed_;
     }
   }
 
 public:
-  FibonacciSpeedIterator &operator++() {
+  SpeedIterator &operator++() {
     adjustSpeed();
     value_ += *speed_;
     return *this;
   }
 
-  FibonacciSpeedIterator &operator--() {
+  SpeedIterator &operator--() {
     adjustSpeed();
     value_ -= std::min(*speed_, value_);
     return *this;
@@ -105,21 +120,136 @@ public:
 
   const T &operator*() const { return value_; }
 
-  const T *operator->() const { return &value_; }
-
-  bool operator==(const FibonacciSpeedIterator &rhs) const {
+  bool operator==(const SpeedIterator &rhs) const {
     return value_ == rhs.value_;
   }
 
-  bool operator!=(const FibonacciSpeedIterator &rhs) const {
+  bool operator!=(const SpeedIterator &rhs) const {
     return !this->operator==(rhs);
   }
 
 private:
-  T value_ = 1;
-  static constexpr FibonacciIterator<T> min_speed_ = {};
-  FibonacciIterator<T> speed_;
+  T value_ = 0;
+  S min_speed_;
+  S speed_;
 };
+
+template <typename T> class ClockDigitsSpeedIterator {
+public:
+  ClockDigitsSpeedIterator &operator++() {
+    ++speedIndex_;
+    while (speedIndex_ >= speeds_().size())
+      --speedIndex_;
+    return *this;
+  }
+
+  ClockDigitsSpeedIterator &operator--() {
+    if (speedIndex_ > 0)
+      --speedIndex_;
+    return *this;
+  }
+
+  bool operator==(const ClockDigitsSpeedIterator &rhs) const {
+    return speedIndex_ == rhs.speedIndex_;
+  }
+
+  bool operator!=(const ClockDigitsSpeedIterator &rhs) const {
+    return !this->operator==(rhs);
+  }
+
+  const T &operator*() const { return speeds_()[speedIndex_]; }
+
+private:
+  static const std::array<T, 15> &speeds_() {
+    static const std::array<T, 15> clock_digits_speeds_{
+        // Seconds
+        1,
+        2,
+        5,
+        1 * 10,
+        2 * 10,
+        5 * 10,
+        // Minutes
+        1 * 60,
+        2 * 60,
+        5 * 60,
+        1 * 60 * 10,
+        2 * 60 * 10,
+        5 * 60 * 10,
+        // Hours
+        1 * 60 * 60,
+        2 * 60 * 60,
+        5 * 60 * 60,
+    };
+    return clock_digits_speeds_;
+  }
+
+  uint8_t speedIndex_ = 0;
+};
+
+template <typename T>
+class TimerCustomIterator {
+  struct RangeDescr {
+    T top;
+    T step;
+    bool operator<(const RangeDescr& rhs) const {
+      return top > rhs.top;
+    }
+    bool operator<(const T& rhs) const {
+      return top > rhs;
+    }
+    friend bool operator<(const T& lhs, const RangeDescr& rhs) {
+      return lhs > rhs.top;
+    }
+  };
+
+  static std::array<RangeDescr, 9> ranges_() {
+    static std::array<RangeDescr, 9> ranges{
+        RangeDescr{60 * 60 * 5, 60 * 60},
+        RangeDescr{60 * 60 * 5 / 2, 30 * 60},
+        RangeDescr{40 * 60, 10 * 60}, // 
+        RangeDescr{20 * 60, 5 * 60}, // 4
+        RangeDescr{10 * 60, 60}, // 10
+        RangeDescr{2 * 60, 30}, // 4
+        RangeDescr{60, 15}, // 4
+        RangeDescr{20, 10}, // 4
+        RangeDescr{0, 5}, // 4
+    };
+    return ranges;
+  }
+
+  public:
+
+  TimerCustomIterator &operator++() {
+    const auto& ranges = ranges_();
+    auto i = std::lower_bound(ranges.begin(), ranges.end(), value_);
+    value_ += i->step;
+    return *this;
+  }
+
+  TimerCustomIterator &operator--() {
+    const auto& ranges = ranges_();
+    auto i = std::upper_bound(ranges.begin(), ranges.end(), value_);
+    if(i == ranges.end()) --i;
+    value_ -= i->step;
+    return *this;
+  }
+
+  const T &operator*() const { return value_; }
+
+  bool operator==(const TimerCustomIterator &rhs) const {
+    return value_ == rhs.value_;
+  }
+
+  bool operator!=(const TimerCustomIterator &rhs) const {
+    return !this->operator==(rhs);
+  }
+  private:
+  T value_ = 0;
+};
+
+template <typename T>
+using FibonacciSpeedIterator = SpeedIterator<T, FibonacciIterator<T>>;
 
 template <typename T> class LinearIterator {
 public:
@@ -135,8 +265,6 @@ public:
 
   const T &operator*() const { return a_; }
 
-  const T *operator->() const { return &a_; }
-
   bool operator==(const LinearIterator &rhs) const { return a_ == rhs.a_; }
 
   bool operator!=(const LinearIterator &rhs) const { return a_ != rhs.a_; }
@@ -147,6 +275,11 @@ private:
 
 // using TimerValueIterator = LinearIterator<esphome::timer::seconds_type>;
 // using TimerValueIterator = FibonacciIterator<esphome::timer::seconds_type>;
-using TimerValueIterator = FibonacciSpeedIterator<esphome::timer::seconds_type>;
+// using TimerValueIterator =
+// FibonacciSpeedIterator<esphome::timer::seconds_type>;
+// using TimerValueIterator =
+//     SpeedIterator<esphome::timer::seconds_type,
+//                   ClockDigitsSpeedIterator<esphome::timer::seconds_type>>;
+using TimerValueIterator = TimerCustomIterator<esphome::timer::seconds_type>;
 
 RTC_DATA_ATTR TimerValueIterator menu_fibonacci_iterator;
