@@ -41,8 +41,12 @@ std::string timer_value_string(uint32_t seconds) {
   seconds %= (60 * 60);
   const auto minutes = seconds / 60;
   seconds %= 60;
-  if (hours > 0) {
-    std::snprintf(buffer, sizeof(buffer), "%1dh.%02d", hours, minutes);
+  if (hours > 99) {
+    std::snprintf(buffer, sizeof(buffer), "%3dh", hours);
+  } else if (hours > 9) {
+    std::snprintf(buffer, sizeof(buffer), "%2dh%d", hours, minutes);
+  } else if (hours > 0) {
+    std::snprintf(buffer, sizeof(buffer), "%1dh%02d", hours, minutes);
   } else {
     std::snprintf(buffer, sizeof(buffer), "%02d.%02d", minutes, seconds);
   }
@@ -89,7 +93,6 @@ template <typename T, typename S> class SpeedIterator {
         break;
       }
     }
-
   }
   void adjustSpeed() {
     adjustMinSpeed();
@@ -97,7 +100,8 @@ template <typename T, typename S> class SpeedIterator {
     return;
 
     ++speed_;
-    while (*min_speed_ > *speed_) ++speed_;
+    while (*min_speed_ > *speed_)
+      ++speed_;
     const auto dt = esphome::millis() - last_step_time_ms;
     last_step_time_ms += dt;
     while (*speed_ > *min_speed_ && dt > 200) {
@@ -187,18 +191,13 @@ private:
   uint8_t speedIndex_ = 0;
 };
 
-template <typename T>
-class TimerCustomIterator {
+template <typename T> class TimerCustomIterator {
   struct RangeDescr {
     T top;
     T step;
-    bool operator<(const RangeDescr& rhs) const {
-      return top > rhs.top;
-    }
-    bool operator<(const T& rhs) const {
-      return top > rhs;
-    }
-    friend bool operator<(const T& lhs, const RangeDescr& rhs) {
+    bool operator<(const RangeDescr &rhs) const { return top > rhs.top; }
+    bool operator<(const T &rhs) const { return top > rhs; }
+    friend bool operator<(const T &lhs, const RangeDescr &rhs) {
       return lhs > rhs.top;
     }
   };
@@ -207,30 +206,30 @@ class TimerCustomIterator {
     static std::array<RangeDescr, 9> ranges{
         RangeDescr{60 * 60 * 5, 60 * 60},
         RangeDescr{60 * 60 * 5 / 2, 30 * 60},
-        RangeDescr{40 * 60, 10 * 60}, // 
-        RangeDescr{20 * 60, 5 * 60}, // 4
-        RangeDescr{10 * 60, 60}, // 10
-        RangeDescr{2 * 60, 30}, // 4
-        RangeDescr{60, 15}, // 4
-        RangeDescr{20, 10}, // 4
-        RangeDescr{0, 5}, // 4
+        RangeDescr{40 * 60, 10 * 60}, //
+        RangeDescr{20 * 60, 5 * 60},  // 4
+        RangeDescr{10 * 60, 60},      // 10
+        RangeDescr{2 * 60, 30},       // 4
+        RangeDescr{60, 15},           // 4
+        RangeDescr{20, 10},           // 4
+        RangeDescr{0, 5},             // 4
     };
     return ranges;
   }
 
-  public:
-
+public:
   TimerCustomIterator &operator++() {
-    const auto& ranges = ranges_();
+    const auto &ranges = ranges_();
     auto i = std::lower_bound(ranges.begin(), ranges.end(), value_);
     value_ += i->step;
     return *this;
   }
 
   TimerCustomIterator &operator--() {
-    const auto& ranges = ranges_();
+    const auto &ranges = ranges_();
     auto i = std::upper_bound(ranges.begin(), ranges.end(), value_);
-    if(i == ranges.end()) --i;
+    if (i == ranges.end())
+      --i;
     value_ -= i->step;
     return *this;
   }
@@ -244,7 +243,8 @@ class TimerCustomIterator {
   bool operator!=(const TimerCustomIterator &rhs) const {
     return !this->operator==(rhs);
   }
-  private:
+
+private:
   T value_ = 0;
 };
 
