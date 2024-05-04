@@ -5,15 +5,18 @@
         "esp32-c3-devkitm-1",
         "esphome",
         "gpio",
+        "hotspot",
         "platformio",
         "pullup",
         "rtttl",
         "sdkconfig",
+        "sntp",
         "strftime",
         "TICKLESS",
         "wakeup"
     ],
     "ignoreRegExpList": [
-        "ESP_LOG[IWD]"
+        "ESP_LOG[IWD]",
+        "password: \".*\""
     ]
 }

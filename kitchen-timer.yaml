@@ -17,10 +17,6 @@ logger:
   level: WARN # DEBUG
 
 external_components:
-  # - source: "github://asergunov/esphome_esphome@tm1637_off"
-  #   components:
-  #     - tm1637
-  #   refresh: 0s
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
     components:
       - rtttl
@@ -67,8 +63,8 @@ esphome:
     board_build.f_cpu: 80000000L
     debug_tool: esp-builtin
     lib_ldf_mode: "chain+"
-    # build_type: debug
-    # board_build.flash_mode: dio
+    build_type: debug
+    board_build.flash_mode: dio
     # extra_scripts:
     #   - pre:../../../extra_script.py
   on_boot:
@@ -97,6 +93,13 @@ globals:
   - id: semicolon_on
     type: bool
     initial_value: "false"
+  - id: recent_timers
+    type: std::array<esphome::timer::seconds_type, 8>
+    restore_value: True
+    setup_priority: 1000
+  - id: menu_recent_timer
+    type: uint8_t
+    initial_value: "0"
   - id: songs
     type: std::vector<std::string>
     restore_value: no
@@ -302,23 +305,13 @@ script:
             - if:
                 condition: rtttl.is_playing
                 else:
-                  - lambda: |
-                      auto&& output = *id(rtttl_out);
-                      output.write_state(1);
-                      output.turn_on();
-                      output.call();
-
-                      delayMicroseconds(900);
-
-                      output.turn_off();
-                      output.call();
                   - delay: 1ms
-                  # - output.set_level:
-                  #     id: rtttl_out
-                  #     level: "100%"
-                  # - output.turn_on: rtttl_out
-                  # - delay: 1ms
-                  # - output.turn_off: rtttl_out
+                  - output.set_level:
+                      id: rtttl_out
+                      level: "100%"
+                  - output.turn_on: rtttl_out
+                  - delay: 1ms
+                  - output.turn_off: rtttl_out
 
 sensor:
   - platform: rotary_encoder
@@ -410,7 +403,7 @@ sensor:
     attenuation: 11db
     accuracy_decimals: 4
     update_interval: 1s
-    id: battery_voltage_unfiltrered
+    id: battery_voltage_unfiltered
     name: Devider Voltage Unfiltered
     entity_category: diagnostic
     internal: True
@@ -421,7 +414,7 @@ sensor:
           //   value -= 0.15;
           return value;
   - platform: copy
-    source_id: battery_voltage_unfiltrered
+    source_id: battery_voltage_unfiltered
     id: battery_voltage
     name: Battery Voltage
     accuracy_decimals: 4
@@ -610,8 +603,64 @@ lcd_menu_7segment:
   mode: rotary
   active: false
   items:
+    - type: menu
+      text: "ТАйМЕР"
+      items:
+      - type: custom
+        text: "СТАРТ"
+        value_lambda: |
+          if(id(menu_recent_timer) < id(recent_timers).size())
+            return timer_value_string(id(recent_timers)[id(menu_recent_timer)]);
+          else
+            return timer_value_string(*menu_fibonacci_iterator);
+          return "НОВЫЙ";
+        on_enter:
+          then:
+            lambda: |
+              id(menu_recent_timer) = id(recent_timers)[id(menu_recent_timer)] == 0 ? 0xff : 0;
+              menu_fibonacci_iterator = TimerValueIterator{};
+        # on_leave:
+        on_next:
+          then:
+            lambda: |
+              auto& i = id(menu_recent_timer);
+              if(i == 0xff) {
+                ++menu_fibonacci_iterator;
+              } else {
+                const auto& vec = id(recent_timers);
+                auto next = id(menu_recent_timer) + 1;
+                if(next < vec.size() && vec[next] != 0) {
+                  i = next;
+                } else {
+                  i = 0xff;
+                }
+              }
+
+        on_prev:
+          then:
+            lambda: |
+              const auto& vec = id(recent_timers);
+              if(id(menu_recent_timer) == 0xff) {
+                if(menu_fibonacci_iterator == TimerValueIterator{}) {
+                  auto i = std::find_if(
+                    vec.rbegin(),
+                    vec.rend(),
+                    [](const esphome::timer::seconds_type& item){ return item != 0; });
+                  if(i != vec.rend()) {
+                    id(menu_recent_timer) = std::distance(vec.begin(), i.base() - 1);
+                  }
+                } else {
+                  --menu_fibonacci_iterator;
+                }
+              } else if(id(menu_recent_timer) > 0) {
+                id(menu_recent_timer)--;
+              }
+
+      - type: back
+        text: НАЗАД
     - type: number
-      text: 'ЯРKOСТЬ'
+      id: brightness_menu_item
+      text: 'ЯРКОСТЬ'
       immediate_edit: false
       value_lambda: |
         std::string result = "Auto";
@@ -625,13 +674,15 @@ lcd_menu_7segment:
         return result;
       number: display_intensity
     - type: switch
+      id: turn_menu_item
       text: 'ПОВОРОТ'
       immediate_edit: false
-      on_text: '1234'
-      off_text: '1234'
+      on_text: '12.34'
+      off_text: '12.34'
       switch: display_flip
     - type: switch
-      text: ТИК
+      id: sound_menu_item
+      text: ЗВУК
       on_text: 'On'
       off_text: 'OFF'
       switch: ticking_switch
@@ -672,10 +723,7 @@ display:
     }
 
     if(smallest_timer) {
-      auto sec = *smallest_timer;
-      auto min = sec /60; 
-      sec = sec % 60;
-      it.printf("%02d.%02d", min, sec);
+      it.printf("%s", timer_value_string(*smallest_timer).c_str());
       return;
     }
 

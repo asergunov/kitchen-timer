@@ -10,9 +10,11 @@
 namespace esphome {
 namespace timer {
 
+using seconds_type = uint32_t;
+
 class TimerTrigger : public Trigger<>, public Component {
 public:
-  using seconds_type = uint32_t;
+  using seconds_type = esphome::timer::seconds_type;
   TimerTrigger(time::RealTimeClock *rtc);
   void start(seconds_type seconds);
   optional<seconds_type> get_seconds_remain() const;
@@ -28,7 +30,7 @@ protected:
 
 class TimerComponent : public Component {
 public:
-  using seconds_type = TimerTrigger::seconds_type;
+  using seconds_type = esphome::timer::seconds_type;
   bool start(const std::string &time_string);
   void start(seconds_type seconds);
   void set_trigger(TimerTrigger *trigger);
