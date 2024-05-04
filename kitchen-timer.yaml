@@ -96,7 +96,9 @@ globals:
   - id: recent_timers
     type: std::array<esphome::timer::seconds_type, 8>
     restore_value: True
-    setup_priority: 1000
+  - id: menu_current_running_timer_component
+    type: esphome::timer::TimerComponent*
+    initial_value: "nullptr"
   - id: menu_recent_timer
     type: uint8_t
     initial_value: "0"
@@ -568,11 +570,11 @@ number:
     update_interval: 1s
     optimistic: True
     restore_value: True
-    on_value: 
+    on_value:
       then:
         - if:
-            condition: 
-              - number.in_range: 
+            condition:
+              - number.in_range:
                   id: display_intensity
                   below: 0
             then:
@@ -608,63 +610,118 @@ number:
             id(my_rtttl).set_gain(0.01*x);
 
 lcd_menu_7segment:
-  id: main_menu
+  id: menu
   mode: rotary
   active: false
   items:
     - type: menu
       text: "ТАйМЕР"
       items:
-      - type: custom
-        text: "НОВЫЙ"
-        value_lambda: |
-          return timer_value_string(
-            id(menu_recent_timer) < id(recent_timers).size() 
-              ? id(recent_timers)[id(menu_recent_timer)] 
-              : *menu_fibonacci_iterator);
-        on_enter:
-          then:
+        - type: custom
+          text: "СТОП"
+          value_lambda: |
+            if(id(menu_current_running_timer_component) == nullptr) return "НАЗАД";
+            const auto& seconds_remain = id(menu_current_running_timer_component)->get_seconds_remain();
+            return timer_value_string(seconds_remain ? *seconds_remain : 0);
+          on_enter:
             lambda: |
-              id(menu_recent_timer) = 0xff;
-              menu_fibonacci_iterator = TimerValueIterator{};
-        # on_leave:
-        on_next:
-          then:
+              std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              auto i = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
+                  return !!timer->get_seconds_remain();
+                });
+
+              id(menu_current_running_timer_component) = i == timer_list.end() ? nullptr : *i;
+          on_next:
             lambda: |
-              auto& i = id(menu_recent_timer);
-              if(i == 0xff) {
-                if(menu_fibonacci_iterator == TimerValueIterator{}) {
-                  const auto& vec = id(recent_timers);
-                  if(vec.front() != 0) {
-                    i = 0;
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              if(id(menu_current_running_timer_component) == nullptr) return;
+              const auto i = std::find_if(
+                std::next(std::find(timer_list.begin(), timer_list.end(), id(menu_current_running_timer_component))),
+                timer_list.end(),
+                [](esphome::timer::TimerComponent* timer){
+                  return !!timer->get_seconds_remain();
+                });
+              id(menu_current_running_timer_component) = i == timer_list.end() ? nullptr : *i;
+          on_prev:
+            lambda: |
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              const auto i_start = id(menu_current_running_timer_component) == nullptr
+                ? timer_list.rbegin()
+                : std::next(std::find(timer_list.rbegin(), timer_list.rend(), id(menu_current_running_timer_component)));
+              auto i = std::find_if(
+                i_start,
+                timer_list.rend(),
+                [](esphome::timer::TimerComponent* timer) {
+                  return !!timer->get_seconds_remain();
+                });
+
+              id(menu_current_running_timer_component) = i == timer_list.rend() ? id(menu_current_running_timer_component) : *i;
+          on_leave:
+            lambda: |
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              if(id(menu_current_running_timer_component)) {
+                id(menu_current_running_timer_component)->start(0);
+              }
+        - type: custom
+          text: "НОВЫЙ"
+          value_lambda: |
+            return timer_value_string(
+              id(menu_recent_timer) < id(recent_timers).size() 
+                ? id(recent_timers)[id(menu_recent_timer)] 
+                : *menu_new_timer_iterator);
+          on_enter:
+            then:
+              lambda: |
+                id(menu_recent_timer) = 0xff;
+                menu_new_timer_iterator = TimerValueIterator{};
+          on_leave:
+            lambda: |
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              auto i_free_timer = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
+                return !timer->get_seconds_remain();
+              });
+              if(i_free_timer == timer_list.end()) return;
+              auto seconds = id(menu_recent_timer) < id(recent_timers).size() 
+                ? id(recent_timers)[id(menu_recent_timer)] 
+                : *menu_new_timer_iterator;
+              (*i_free_timer)->start(seconds);
+          on_next:
+            then:
+              lambda: |
+                auto& i = id(menu_recent_timer);
+                if(i == 0xff) {
+                  if(menu_new_timer_iterator == TimerValueIterator{}) {
+                    const auto& vec = id(recent_timers);
+                    if(vec.front() != 0) {
+                      i = 0;
+                    }
+                  } else {
+                    --menu_new_timer_iterator;
                   }
                 } else {
-                  --menu_fibonacci_iterator;
+                  const auto& vec = id(recent_timers);
+                  auto next = id(menu_recent_timer) + 1;
+                  if(next < vec.size() && vec[next] != 0) {
+                    i = next;
+                  }
                 }
-              } else {
-                const auto& vec = id(recent_timers);
-                auto next = id(menu_recent_timer) + 1;
-                if(next < vec.size() && vec[next] != 0) {
-                  i = next;
+          on_prev:
+            then:
+              lambda: |
+                if(id(menu_recent_timer) == 0) {
+                  id(menu_recent_timer) = 0xff;
+                } else if(id(menu_recent_timer) == 0xff) {
+                  if(*menu_new_timer_iterator < 24*60*60)
+                    ++menu_new_timer_iterator;
+                } else if(id(menu_recent_timer) > 0) {
+                  id(menu_recent_timer)--;
                 }
-              }
-        on_prev:
-          then:
-            lambda: |
-              if(id(menu_recent_timer) == 0) {
-                id(menu_recent_timer) = 0xff;
-              } else if(id(menu_recent_timer) == 0xff) {
-                if(*menu_fibonacci_iterator < 24*60*60)
-                  ++menu_fibonacci_iterator;
-              } else if(id(menu_recent_timer) > 0) {
-                id(menu_recent_timer)--;
-              }
 
-      - type: back
-        text: НАЗАД
+        - type: back
+          text: НАЗАД
     - type: number
       id: brightness_menu_item
-      text: 'ЯРКОСТЬ'
+      text: "ЯРКОСТЬ"
       immediate_edit: false
       value_lambda: |
         std::string result = "Auto";
@@ -679,16 +736,16 @@ lcd_menu_7segment:
       number: display_intensity
     - type: switch
       id: turn_menu_item
-      text: 'ПОВОРОТ'
+      text: "ПОВОРОТ"
       immediate_edit: false
-      on_text: '12.34'
-      off_text: '12.34'
+      on_text: "12.34"
+      off_text: "12.34"
       switch: display_flip
     - type: switch
       id: sound_menu_item
       text: ЗВУК
-      on_text: 'On'
-      off_text: 'OFF'
+      on_text: "On"
+      off_text: "OFF"
       switch: ticking_switch
     - type: command
       text: НАЗАД
@@ -707,8 +764,8 @@ display:
   update_interval: never
   intensity: 7
   lambda: |-
-    if (id(main_menu).is_active()) {
-      id(main_menu).draw();
+    if (id(menu).is_active()) {
+      id(menu).draw();
       return;
     }
 

@@ -282,4 +282,4 @@ private:
 //                   ClockDigitsSpeedIterator<esphome::timer::seconds_type>>;
 using TimerValueIterator = TimerCustomIterator<esphome::timer::seconds_type>;
 
-RTC_DATA_ATTR TimerValueIterator menu_fibonacci_iterator;
+RTC_DATA_ATTR TimerValueIterator menu_new_timer_iterator;
