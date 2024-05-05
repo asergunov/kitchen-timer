@@ -63,7 +63,8 @@ esphome:
     board_build.f_cpu: 80000000L
     debug_tool: esp-builtin
     lib_ldf_mode: "chain+"
-    build_type: debug
+    # build_type: debug
+    monitor_filters: esp32_exception_decoder
     board_build.flash_mode: dio
     # extra_scripts:
     #   - pre:../../../extra_script.py
