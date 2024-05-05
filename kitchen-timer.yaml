@@ -48,9 +48,9 @@ substitutions:
   charging_pin: "5"
   fully_charged_pin: "0"
   timezone: "<+06>-6"
-  timer_list_sound: "id(timer_1_sound), id(timer_2_sound)"
-  timer_list: "id(timer_1_timer), id(timer_2_timer)"
-  signal_list_sound: "id(signal_1_sound), id(signal_2_sound)"
+  timer_list_sound: "id(timer_1_sound), id(timer_2_sound), id(timer_3_sound), id(timer_4_sound), id(timer_5_sound), id(timer_6_sound), id(timer_7_sound), id(timer_8_sound)"
+  timer_list: "id(timer_1_timer), id(timer_2_timer), id(timer_3_timer), id(timer_4_timer), id(timer_5_timer), id(timer_6_timer), id(timer_7_timer), id(timer_8_timer)"
+  signal_list_sound: "id(signal_1_sound), id(signal_2_sound), id(signal_3_sound), id(signal_4_sound), id(signal_5_sound), id(signal_6_sound), id(signal_7_sound), id(signal_8_sound)"
 
 esphome:
   name: kitchen-timer
@@ -183,6 +183,30 @@ packages:
     file: .kitchen-timer_signal.yaml
     vars:
       index: 2
+  signal3: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 3
+  signal4: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 4
+  signal5: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 5
+  signal6: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 6
+  signal7: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 7
+  signal8: !include
+    file: .kitchen-timer_signal.yaml
+    vars:
+      index: 8
   timer1: !include
     file: .kitchen-timer_timer.yaml
     vars:
@@ -191,6 +215,30 @@ packages:
     file: .kitchen-timer_timer.yaml
     vars:
       index: 2
+  timer3: !include
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 3
+  timer4: !include
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 4
+  timer5: !include
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 5
+  timer6: !include
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 6
+  timer7: !include
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 7
+  timer8: !include
+    file: .kitchen-timer_timer.yaml
+    vars:
+      index: 8
 
 deep_sleep:
   id: deep_sleep_component
@@ -619,6 +667,62 @@ lcd_menu_7segment:
       text: "ТАйМЕР"
       items:
         - type: custom
+          text: "СТАРТ"
+          value_lambda: |
+            return timer_value_string(
+              id(menu_recent_timer) < id(recent_timers).size() 
+                ? id(recent_timers)[id(menu_recent_timer)] 
+                : *menu_new_timer_iterator);
+          on_enter:
+            then:
+              lambda: |
+                id(menu_recent_timer) = 0xff;
+                menu_new_timer_iterator = TimerValueIterator{};
+          on_leave:
+            lambda: |
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              auto i_free_timer = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
+                return !timer->get_seconds_remain();
+              });
+              if(i_free_timer == timer_list.end()) return;
+              auto seconds = id(menu_recent_timer) < id(recent_timers).size() 
+                ? id(recent_timers)[id(menu_recent_timer)] 
+                : *menu_new_timer_iterator;
+              (*i_free_timer)->start(seconds);
+              if(seconds)
+                add_to_recent_timers(id(recent_timers), seconds);
+          on_next:
+            then:
+              lambda: |
+                auto& i = id(menu_recent_timer);
+                if(i == 0xff) {
+                  if(menu_new_timer_iterator == TimerValueIterator{}) {
+                    const auto& vec = id(recent_timers);
+                    if(vec.front() != 0) {
+                      i = 0;
+                    }
+                  } else {
+                    --menu_new_timer_iterator;
+                  }
+                } else {
+                  const auto& vec = id(recent_timers);
+                  auto next = id(menu_recent_timer) + 1;
+                  if(next < vec.size() && vec[next] != 0) {
+                    i = next;
+                  }
+                }
+          on_prev:
+            then:
+              lambda: |
+                if(id(menu_recent_timer) == 0) {
+                  id(menu_recent_timer) = 0xff;
+                } else if(id(menu_recent_timer) == 0xff) {
+                  if(*menu_new_timer_iterator < 24*60*60)
+                    ++menu_new_timer_iterator;
+                } else if(id(menu_recent_timer) > 0) {
+                  id(menu_recent_timer)--;
+                }
+        - type: custom
           text: "СТОП"
           value_lambda: |
             if(id(menu_current_running_timer_component) == nullptr) return "НАЗАД";
@@ -663,60 +767,6 @@ lcd_menu_7segment:
               if(id(menu_current_running_timer_component)) {
                 id(menu_current_running_timer_component)->start(0);
               }
-        - type: custom
-          text: "НОВЫЙ"
-          value_lambda: |
-            return timer_value_string(
-              id(menu_recent_timer) < id(recent_timers).size() 
-                ? id(recent_timers)[id(menu_recent_timer)] 
-                : *menu_new_timer_iterator);
-          on_enter:
-            then:
-              lambda: |
-                id(menu_recent_timer) = 0xff;
-                menu_new_timer_iterator = TimerValueIterator{};
-          on_leave:
-            lambda: |
-              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
-              auto i_free_timer = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
-                return !timer->get_seconds_remain();
-              });
-              if(i_free_timer == timer_list.end()) return;
-              auto seconds = id(menu_recent_timer) < id(recent_timers).size() 
-                ? id(recent_timers)[id(menu_recent_timer)] 
-                : *menu_new_timer_iterator;
-              (*i_free_timer)->start(seconds);
-          on_next:
-            then:
-              lambda: |
-                auto& i = id(menu_recent_timer);
-                if(i == 0xff) {
-                  if(menu_new_timer_iterator == TimerValueIterator{}) {
-                    const auto& vec = id(recent_timers);
-                    if(vec.front() != 0) {
-                      i = 0;
-                    }
-                  } else {
-                    --menu_new_timer_iterator;
-                  }
-                } else {
-                  const auto& vec = id(recent_timers);
-                  auto next = id(menu_recent_timer) + 1;
-                  if(next < vec.size() && vec[next] != 0) {
-                    i = next;
-                  }
-                }
-          on_prev:
-            then:
-              lambda: |
-                if(id(menu_recent_timer) == 0) {
-                  id(menu_recent_timer) = 0xff;
-                } else if(id(menu_recent_timer) == 0xff) {
-                  if(*menu_new_timer_iterator < 24*60*60)
-                    ++menu_new_timer_iterator;
-                } else if(id(menu_recent_timer) > 0) {
-                  id(menu_recent_timer)--;
-                }
 
         - type: back
           text: НАЗАД
