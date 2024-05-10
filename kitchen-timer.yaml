@@ -14,12 +14,23 @@ esp32:
 
 # Enable logging
 logger:
-  level: WARN # DEBUG
+  # level: INFO
+  level: DEBUG
+  logs: 
+    number: INFO
+    timer: INFO
+    text: INFO
+    sensor: INFO
+    
 
 external_components:
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
     components:
       - rtttl
+    refresh: 0s
+  - source: "github://asergunov/esphome_esphome@sntp"
+    components:
+      - sntp
     refresh: 0s
   - source: "github://asergunov/esphome_esphome@7digits_display_menu"
     components:
@@ -84,11 +95,16 @@ esphome:
             select->traits.set_options(names);
             select->set_initial_option(names[0]);
           }
-      - lambda: |
-          // App.set_loop_interval(500);
+      - if:
+          condition: 
+            - lambda: "return !sntp_synched;"
+          then: 
+            - script.execute: sntp_sync
+      # - lambda: |
+      #     App.set_loop_interval(100);
 
 globals:
-  - id: enable_sleeping
+  - id: time_sync_in_progress
     type: bool
     initial_value: "false"
   - id: semicolon_on
@@ -248,13 +264,19 @@ deep_sleep:
 wifi:
   id: wifi_component
   power_save_mode: HIGH
-  # enable_on_boot: False
+  enable_on_boot: False
   # fast_connect: True
   networks:
     - ssid: !secret parents.wifi_ssid
       password: !secret parents.wifi_password
     - ssid: !secret wifi_ssid
       password: !secret wifi_password
+  on_connect:
+    if:
+      condition:
+        - binary_sensor.is_off: ac_powered
+      then:
+        - component.update: sntp_time
 
 #   # Enable fallback hotspot (captive portal) in case wifi connection fails
 #   ap:
@@ -271,13 +293,36 @@ time:
     id: sntp_time
     timezone: ${timezone}
     on_time:
-      seconds: /1
-      minutes: /1
-      then:
-        - lambda: "id(semicolon_on) = !id(semicolon_on);"
-        - component.update: tm1637_display
-        - script.execute: tick_sound
-
+      - seconds: /1
+        minutes: /1
+        then:
+          - lambda: "id(semicolon_on) = !id(semicolon_on);"          
+          - script.execute: tick_sound
+          - wait_until: 
+              condition:
+               not:
+                - rtttl.is_playing:   
+          - lambda: |
+              if(!id(ac_powered).state) {
+                ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(500*1000));
+                ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
+                App.run_safe_shutdown_hooks();
+                // adc_power_off();
+                // esp_task_wdt_delete(nullptr);
+                id(tm1637_display).display();
+                id(tm1637_display).update();
+                id(tm1637_display).stop_poller();
+                ESP_ERROR_CHECK(esp_light_sleep_start());
+                id(tm1637_display).start_poller();
+                // esp_task_wdt_init(nullptr);
+              } else {
+                id(tm1637_display).update();
+              }
+      - minutes: /2
+        seconds: 0
+        then:
+          - script.execute: sntp_sync
+              
 switch:
   - platform: gpio
     id: power_saving
@@ -323,6 +368,9 @@ output:
     pin:
       number: ${passive_buzzer_pin}
       inverted: False
+      mode: 
+        open_drain: True
+        output: True
 
 rtttl:
   output: rtttl_out
@@ -363,13 +411,37 @@ script:
                   - output.turn_on: rtttl_out
                   - delay: 1ms
                   - output.turn_off: rtttl_out
-
   - id: auto_menu_exit
     mode: restart
     then:
       - delay: 60s
       - display_menu.hide:
-
+  - id: sntp_sync
+    mode: single
+    then:
+      - delay: 10ms
+      - logger.log: "Enabling wifi"
+      - wifi.enable:
+      - logger.log: "Waiting for connection"
+      - wait_until: 
+          condition: 
+            - wifi.connected: 
+      - logger.log: "Starting sntp sync"
+      - component.update: sntp_time
+      - logger.log: "Waiting for sntp sync"
+      - wait_until:
+          condition: 
+            - lambda: "return !id(sntp_time)->is_in_progress();"
+      - if:
+          condition:
+            - binary_sensor.is_off: ac_powered
+          then:
+            - logger.log: "Disabling wifi"
+            - wifi.disable:
+      - lambda: |
+          sntp_synched = true;
+                
+              
 sensor:
   - platform: debug
     free:
@@ -385,6 +457,7 @@ sensor:
   - platform: rotary_encoder
     id: encoder
     name: Encoder Position
+    internal: True
     pin_a:
       inverted: True
       number: ${rotary_encoder_a_pin}
@@ -498,6 +571,20 @@ sensor:
           alpha: 0.1
           send_every: 5
   - platform: copy
+    source_id: battery_voltage_unfiltered
+    id: charging_voltage
+    name: Battery Charging Voltage
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    filters:
+      - lambda: |
+          if(!id(charging_sensor).state)
+            return {};
+          return x;
+      - exponential_moving_average:
+          alpha: 0.1
+          send_every: 5
+  - platform: copy
     source_id: battery_voltage
     name: Battery
     device_class: battery
@@ -585,6 +672,18 @@ binary_sensor:
     id: ac_powered
     lambda: |
       return id(fully_charged).state || id(charging_sensor).state;
+    on_press: 
+      wifi.enable:
+    on_release:
+      if:
+        condition:
+          not:
+            or:
+              - script.is_running: sntp_sync
+              - binary_sensor.is_on: ac_powered
+        then:
+          - logger.log: "Disabling wifi 2"
+          # - wifi.disable:
 
 text:
   - platform: template
@@ -827,46 +926,42 @@ display:
   intensity: 7
   lambda: |-
     if (id(menu).is_active()) {
+      it.set_on(true);
       id(menu).draw();
       return;
     }
 
-    optional<uint32_t> smallest_timer;
-    for(const auto& timer : {${timer_list}}) {
-      const auto& remain = timer->get_seconds_remain();
-      if(!remain) {
-        continue;
-      }
-      if(!smallest_timer) {
-        smallest_timer = remain;
-        continue;
-      }
-
-      smallest_timer = std::min(*smallest_timer, *remain);
-    }
+    optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
 
     if(smallest_timer) {
+      it.set_on(true);
       it.printf("%s", timer_value_string(*smallest_timer).c_str());
       return;
     }
 
     auto && wifi = id(wifi_component);
     if(!wifi->is_disabled() && !wifi->is_connected()) {
+      it.set_on(true);
       it.print("WIFI");
       return;
     }
 
-    if (id(semicolon_on))
-      it.strftime("%H.%M", id(sntp_time).now());
-    else {
-      it.strftime("%H%M", id(sntp_time).now());
-      // ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(5000*1000));
-      // ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
-      // App.run_safe_shutdown_hooks();
-      // adc_power_off();
-      // ESP_ERROR_CHECK(esp_light_sleep_start());
+    if (id(sntp_sync)->is_running()) {
+      it.set_on(true);
+      it.print("sync");
+      return;
     }
 
+    if (id(sntp_time)->is_in_progress()) {
+      it.set_on(true);
+      it.print("sntp");
+      return;
+    }
+
+    const auto now = id(sntp_time).now();
+
+    it.strftime(id(semicolon_on) ? "%H.%M": "%H%M", now);
+    
 
     // id(deep_sleep_component).allow_deep_sleep();
 
@@ -875,7 +970,7 @@ display:
     // id(deep_sleep_component).set_sleep_duration(500);
     // id(deep_sleep_component).begin_sleep(false);
 
-    if(id(enable_sleeping)) {
+    // if(id(enable_sleeping)) {
       // App.run_safe_shutdown_hooks();
       // for(const auto& gpio: std::initializer_list<gpio_num_t>{ GPIO_NUM_10, GPIO_NUM_21, GPIO_NUM_20 }) {
       //  ESP_ERROR_CHECK(gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL));
@@ -884,4 +979,4 @@ display:
       //ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
       //ESP_ERROR_CHECK(esp_light_sleep_start());
 
-    }
+    // }
