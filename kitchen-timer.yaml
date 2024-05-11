@@ -296,17 +296,17 @@ time:
       - seconds: /1
         minutes: /1
         then:
-          - lambda: "id(semicolon_on) = !id(semicolon_on);"          
+          - lambda: "id(semicolon_on) = !id(semicolon_on);"
           - script.execute: tick_sound
           - wait_until: 
               condition:
                not:
-                - rtttl.is_playing:   
+                - rtttl.is_playing:
           - lambda: |
               if(!id(ac_powered).state) {
                 ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(500*1000));
                 ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
-                App.run_safe_shutdown_hooks();
+                // App.run_safe_shutdown_hooks();
                 // adc_power_off();
                 // esp_task_wdt_delete(nullptr);
                 id(tm1637_display).display();

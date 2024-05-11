@@ -159,11 +159,11 @@ public:
   }
 
   template <typename T> static TimeVal from_milliseconds(const T &ms) {
-    return {ms / 1000l, (ms % 1000l) * 1000l};
+    return TimeVal(ms / 1000l, (ms % 1000l) * 1000l);
   }
 
   template <typename T> static TimeVal from_useconds(const T &us) {
-    return {us / 1000000l, (us % 1000000l)};
+    return TimeVal(us / 1000000l, (us % 1000000l));
   }
 
   TimeVal operator-(const TimeVal &rhs) const {
@@ -176,6 +176,16 @@ public:
     TimeVal res;
     timeradd(this, &rhs, &res);
     return res;
+  }
+
+  TimeVal operator+=(const TimeVal &rhs) {
+    timeradd(this, &rhs, this);
+    return *this;
+  }
+
+  TimeVal operator-=(const TimeVal &rhs) {
+    timersub(this, &rhs, this);
+    return *this;
   }
 
   bool operator>(const TimeVal &rhs) const {
