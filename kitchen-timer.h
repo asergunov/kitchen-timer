@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_attr.h"
+#include "esp_task_wdt.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
 
@@ -218,6 +219,11 @@ class ClockUpdater {
 public:
   ClockUpdater(uint16_t update_interval_ms)
       : update_interval_ms_(update_interval_ms) {
+    reset_next_update();
+  }
+
+  void reset_next_update() {
+    ESP_LOGD(TAG, "Reset the next update time");
     const auto now = TimeVal::now();
     const auto update_interval =
         TimeVal::from_milliseconds(update_interval_ms_);
@@ -225,20 +231,26 @@ public:
     next_update_ -= next_update_ % update_interval;
   }
 
-  bool can_update() {
-    return next_update_ - TimeVal::now() +
-               TimeVal::from_milliseconds(update_interval_ms_ * 1 / 8) >
-           TimeVal();
+  bool can_update() const {
+    return next_update_ < TimeVal::now() + TimeVal::from_milliseconds(update_interval_ms_ * 1 / 8);
   }
 
-  uint64_t mark_updated() {
+  uint64_t useconds_to_update() const {
+    const auto& now = TimeVal::now();
+    return next_update_ < now ? 0 : (next_update_ - now).to_useconds();
+  }
+
+  void mark_updated() {
+    ESP_LOGD(TAG, "Mark as updated");
     const auto now = TimeVal::now();
     const auto update_interval =
         TimeVal::from_milliseconds(update_interval_ms_);
     next_update_ += update_interval;
-    
-    return next_update_ < now ? 0 : (next_update_ - now).to_useconds();
+
+    if(next_update_ + update_interval + update_interval < now) {
+      reset_next_update();
+    }
   }
 };
 
-ClockUpdater clock_updater(500);
+ClockUpdater clock_updater(1000);

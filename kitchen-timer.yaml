@@ -6,21 +6,22 @@ esp32:
     type: esp-idf
     version: recommended
     sdkconfig_options:
+      # CONFIG_ESP_SYSTEM_PANIC_GDBSTUB: y
       CONFIG_PM_ENABLE: y
-      # CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
-      # CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: y
+      CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
+      CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: y
       # CONFIG_PM_USE_RTC_TIMER_REF: y
-      # CONFIG_PM_DFS_INIT_AUTO: y
+      CONFIG_PM_DFS_INIT_AUTO: y
 
 # Enable logging
 logger:
-  # level: INFO
-  level: DEBUG
-  logs: 
-    number: INFO
-    timer: INFO
-    text: INFO
-    sensor: INFO
+  level: INFO
+  # level: DEBUG
+  # logs: 
+  #   number: INFO
+  #   timer: INFO
+  #   text: INFO
+  #   sensor: INFO
     
 
 external_components:
@@ -102,6 +103,7 @@ esphome:
             - script.execute: sntp_sync
       # - lambda: |
       #     App.set_loop_interval(100);
+      - script.execute: update_screen
 
 globals:
   - id: time_sync_in_progress
@@ -293,31 +295,6 @@ time:
     id: sntp_time
     timezone: ${timezone}
     on_time:
-      - seconds: /1
-        minutes: /1
-        then:
-          - lambda: "id(semicolon_on) = !id(semicolon_on);"
-          - script.execute: tick_sound
-          - wait_until: 
-              condition:
-               not:
-                - rtttl.is_playing:
-          - lambda: |
-              if(!id(ac_powered).state) {
-                ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(500*1000));
-                ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
-                // App.run_safe_shutdown_hooks();
-                // adc_power_off();
-                // esp_task_wdt_delete(nullptr);
-                id(tm1637_display).display();
-                id(tm1637_display).update();
-                id(tm1637_display).stop_poller();
-                ESP_ERROR_CHECK(esp_light_sleep_start());
-                id(tm1637_display).start_poller();
-                // esp_task_wdt_init(nullptr);
-              } else {
-                id(tm1637_display).update();
-              }
       - minutes: /2
         seconds: 0
         then:
@@ -440,7 +417,111 @@ script:
             - wifi.disable:
       - lambda: |
           sntp_synched = true;
-                
+  - id: update_screen
+    then:
+      while:
+        condition: 
+          lambda: return true;
+        then:
+          - if:
+              condition: 
+                - lambda: return clock_updater.can_update();
+              then:
+                - script.execute: tick_sound
+                - lambda: |
+                    id(semicolon_on) = !id(semicolon_on);
+                    clock_updater.mark_updated();
+                    // id(tm1637_display).display();
+                - component.update: tm1637_display
+                - wait_until: 
+                    condition:
+                      not:
+                        - script.is_running: tick_sound
+          - if:
+              condition:
+                  and:
+                    - binary_sensor.is_off: ac_powered
+              then:
+                - lambda: |
+                    App.set_loop_interval(std::max(uint64_t(17), clock_updater.useconds_to_update()/1000));
+              else:
+                - lambda: |
+                    App.set_loop_interval(17);
+          - if:
+              condition:
+                and:
+                  - lambda: return false;
+                  - binary_sensor.is_off: ac_powered
+                  - not: 
+                      script.is_running: sntp_sync
+                  - not: 
+                      display_menu.is_active:
+                  - not:
+                      - wifi.enabled:
+              then:
+                - delay: 10ms
+                - lambda: |
+                    const auto to_sleep = clock_updater.useconds_to_update();
+                    ESP_LOGD(TAG, "To sleep calculates as %dus", to_sleep);
+                    if(to_sleep < 15*1000) {
+                      ESP_LOGD(TAG, "To short to sleep");
+                      return;
+                    }
+
+                    ESP_LOGD(TAG, "Enabling timer wakeup");
+                    auto result = esp_sleep_enable_timer_wakeup(to_sleep);
+                    if(result != ESP_OK) {
+                      ESP_LOGE(TAG, "Can't setup wake timer for %dus, error: %d", to_sleep, result);
+                      return;
+                    }
+
+                    // static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
+                    //   gpio_num_t($rotary_encoder_a_pin), 
+                    //   gpio_num_t($rotary_encoder_b_pin), 
+                    //   gpio_num_t($rotary_encoder_button_pin),
+                    //   gpio_num_t($charging_pin),
+                    //   gpio_num_t($fully_charged_pin) };
+
+                    // ESP_LOGD(TAG, "Enabling GPIO wakeup");
+                    // for(const auto& gpio: wake_pins) {
+                    //   result = gpio_intr_disable(gpio);
+                    //   if(ESP_OK != result) {
+                    //     ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
+                    //   }
+                    //   result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
+                    //   if(ESP_OK != result) {
+                    //     ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
+                    //   }
+                    // }
+
+                    // result = esp_sleep_enable_gpio_wakeup();
+                    // if(ESP_OK != result) {
+                    //   ESP_LOGE(TAG, "Can't enable gpio wakeup, error %d", result);
+                    // }
+                    // App.run_safe_shutdown_hooks();
+                    // adc_power_off();
+                    // esp_task_wdt_delete(nullptr);
+                    // id(tm1637_display).stop_poller();
+                    // ESP_LOGD(TAG, "Starting light sleep");
+                    // result = esp_light_sleep_start();
+                    
+                    // ESP_LOGD(TAG, "Enabling GPIO interrupts");
+                    // for(const auto& gpio: wake_pins) {
+                    //   result = gpio_intr_enable(gpio);
+                    //   if(ESP_OK != result) {
+                    //     ESP_LOGE(TAG, "Can't enable gpio interrupt %d, error: %d", gpio, result);
+                    //   }
+                    // }
+                    // esp_task_wdt_init(15, false);
+                    // if(result != ESP_OK) {
+                    //   ESP_LOGE(TAG, "Can't start sleep, error: %d", result);
+                    // } else {
+                    //   ESP_LOGD(TAG, "Woke up");
+                    // }
+                    // id(tm1637_display).start_poller();
+              else:
+                - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
+  
               
 sensor:
   - platform: debug
@@ -678,12 +759,10 @@ binary_sensor:
       if:
         condition:
           not:
-            or:
-              - script.is_running: sntp_sync
-              - binary_sensor.is_on: ac_powered
+            script.is_running: sntp_sync
         then:
           - logger.log: "Disabling wifi 2"
-          # - wifi.disable:
+          - wifi.disable:
 
 text:
   - platform: template
@@ -939,24 +1018,27 @@ display:
       return;
     }
 
-    auto && wifi = id(wifi_component);
-    if(!wifi->is_disabled() && !wifi->is_connected()) {
-      it.set_on(true);
-      it.print("WIFI");
-      return;
+    if(!id(semicolon_on)) {
+      auto && wifi = id(wifi_component);
+      if(!wifi->is_disabled() && !wifi->is_connected()) {
+        it.set_on(true);
+        it.print("WIFI");
+        return;
+      }
+
+      if (id(sntp_sync)->is_running()) {
+        it.set_on(true);
+        it.print("sync");
+        return;
+      }
+
+      if (id(sntp_time)->is_in_progress()) {
+        it.set_on(true);
+        it.print("sntp");
+        return;
+      }
     }
 
-    if (id(sntp_sync)->is_running()) {
-      it.set_on(true);
-      it.print("sync");
-      return;
-    }
-
-    if (id(sntp_time)->is_in_progress()) {
-      it.set_on(true);
-      it.print("sntp");
-      return;
-    }
 
     const auto now = id(sntp_time).now();
 
