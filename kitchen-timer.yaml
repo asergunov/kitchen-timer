@@ -8,10 +8,11 @@ esp32:
     sdkconfig_options:
       # CONFIG_ESP_SYSTEM_PANIC_GDBSTUB: y
       CONFIG_PM_ENABLE: y
-      CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
-      CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: y
+      # CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
+      # CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: y
       # CONFIG_PM_USE_RTC_TIMER_REF: y
-      CONFIG_PM_DFS_INIT_AUTO: y
+      # CONFIG_PM_DFS_INIT_AUTO: y
+      # CONFIG_ESP_INT_WDT: n
 
 # Enable logging
 logger:
@@ -452,7 +453,9 @@ script:
           - if:
               condition:
                 and:
-                  - binary_sensor.is_off: ac_powered
+                  - binary_sensor.is_off: encoder_button
+                  - binary_sensor.is_off: charging_sensor
+                  - binary_sensor.is_off: fully_charged
                   - not: 
                       script.is_running: sntp_sync
                   - not: 
@@ -460,7 +463,6 @@ script:
                   - not:
                       - wifi.enabled:
               then:
-                - delay: 10ms
                 - lambda: |
                     const auto to_sleep = clock_updater.useconds_to_update();
                     ESP_LOGD(TAG, "To sleep calculates as %dus", to_sleep);
@@ -476,6 +478,13 @@ script:
                       return;
                     }
 
+                    for(const auto& gpio: wake_pins) {
+                      if(0 == gpio_get_level(gpio)) {
+                        ESP_LOGD(TAG, "GPIO %d is low. Don't sleep", gpio);
+                        return;
+                      }
+                    }
+
                     static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
                       gpio_num_t($rotary_encoder_button_pin),
                       gpio_num_t($charging_pin),
@@ -483,18 +492,14 @@ script:
                       };
 
                     static const auto encoder_pins = std::initializer_list<gpio_num_t>{ 
-                      gpio_num_t($rotary_encoder_a_pin), 
-                      gpio_num_t($rotary_encoder_b_pin), 
+                      // gpio_num_t($rotary_encoder_a_pin), 
+                      // gpio_num_t($rotary_encoder_b_pin), 
                     };
                     
                     
 
                     ESP_LOGD(TAG, "Enabling GPIO wakeup");
                     for(const auto& gpio: wake_pins) {
-                    //   result = gpio_intr_disable(gpio);
-                    //   if(ESP_OK != result) {
-                    //     ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
-                    //   }
                       result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
                       if(ESP_OK != result) {
                         ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
@@ -522,29 +527,57 @@ script:
                     // id(tm1637_display).stop_poller();
                     // ESP_LOGD(TAG, "Starting light sleep");
                     result = esp_light_sleep_start();
-                    if(result != ESP_OK) {
-                      ESP_LOGE(TAG, "Can't start sleep, error: %d", result);
-                    } else {
-                      ESP_LOGD(TAG, "Woke up");
 
-                      switch(esp_sleep_get_wakeup_cause()) {
-                        case ESP_SLEEP_WAKEUP_GPIO:
-                          id(encoder_button)->loop();
-                          id(charging_sensor)->loop();
-                          id(fully_charged)->loop();
-                          break;
-                        default:
-                          break;
+                    for(const auto& gpio: wake_pins) {
+                      const auto result = gpio_wakeup_disable(gpio);
+                      if(ESP_OK != result) {
+                        ESP_LOGE(TAG, "Can't disable gpio wake source %d, error: %d", gpio, result);
                       }
                     }
-                    
+
                     ESP_LOGD(TAG, "Enabling GPIO interrupts");
                     for(const auto& gpio: encoder_pins) {
-                      result = gpio_intr_enable(gpio);
+                      const auto result = gpio_intr_enable(gpio);
                       if(ESP_OK != result) {
                         ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
                       }
                     }
+
+                    switch(result) {
+                      case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
+                        ESP_LOGE(TAG, "Can't start sleep: duration to short");
+                        break;
+                      case ESP_ERR_SLEEP_REJECT:
+                        ESP_LOGE(TAG, "Can't start sleep: sleep reject");
+                        break;
+                      case ESP_OK:
+                        ESP_LOGD(TAG, "Woke up");
+                        switch(esp_sleep_get_wakeup_cause()) {
+                          case ESP_SLEEP_WAKEUP_GPIO:
+                            ESP_LOGI(TAG, "Wake cause is GPIO");
+                            id(encoder_button)->loop();
+                            ESP_LOGI(TAG, "encoder_button: %d", int(id(encoder_button).state));
+                            id(charging_sensor)->loop();
+                            ESP_LOGI(TAG, "charging_sensor: %d", int(id(charging_sensor).state));
+                            id(fully_charged)->loop();
+                            ESP_LOGI(TAG, "fully_charged: %d", int(id(fully_charged).state));
+                            id(ac_powered)->loop();
+                            ESP_LOGI(TAG, "ac_powered: %d", int(id(ac_powered).state));
+                            break;
+                          case ESP_SLEEP_WAKEUP_TIMER:
+                            ESP_LOGD(TAG, "Wake cause is a Timer");
+                            break;
+                          default:
+                            ESP_LOGW(TAG, "Unexpected wake cause %d", esp_sleep_get_wakeup_cause());
+                            break;
+                        }
+                        break;
+                      default:
+                        ESP_LOGE(TAG, "Can't start sleep: error %d", result);
+                        break;
+                    }
+
+                    
                     // esp_task_wdt_init(15, false);
                     // id(tm1637_display).start_poller();
               else:
