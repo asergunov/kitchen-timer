@@ -97,14 +97,10 @@ esphome:
             select->traits.set_options(names);
             select->set_initial_option(names[0]);
           }
-      - if:
-          condition: 
-            - lambda: "return !sntp_synched;"
-          then: 
-            - script.execute: sntp_sync
       # - lambda: |
       #     App.set_loop_interval(100);
       - script.execute: update_screen
+      - script.execute: wifi_for_sync
 
 globals:
   - id: time_sync_in_progress
@@ -295,12 +291,6 @@ time:
   - platform: sntp
     id: sntp_time
     timezone: ${timezone}
-    on_time:
-      - minutes: 0
-        seconds: 0
-        hours: /1
-        then:
-          - script.execute: sntp_sync
               
 switch:
   - platform: gpio
@@ -395,44 +385,33 @@ script:
     then:
       - delay: 60s
       - display_menu.hide:
-  - id: sntp_sync
+  - id: wifi_for_sync
     mode: single
     then:
-      - delay: 10ms
-      - logger.log: "Enabling wifi"
-      - wifi.enable:
-      - logger.log: "Waiting for connection"
-      - wait_until: 
-          timeout: 
-            seconds: 15
+      - while: 
           condition: 
-            - wifi.connected: 
-      - logger.log: "Starting sntp sync"
-      - if:
-          condition: 
-            - wifi.connected
+            - lambda: return true;
           then:
-            - component.update: sntp_time
-            - delay: 10ms
-            - logger.log: "Waiting for sntp sync"
-            - wait_until:
-                timeout: 
-                  seconds: 10
+            - delay: 100ms
+            - if: 
                 condition: 
-                  - lambda: "return !id(sntp_time)->is_in_progress();"
-            - if:
-                condition:
-                  - binary_sensor.is_off: ac_powered
+                  - lambda: return id(sntp_time)->is_in_progress();
                 then:
-                  - logger.log: "Disabling wifi"
-                  - wifi.disable:
-            - lambda: |
-                sntp_synched = true;
+                  - logger.log: "Enabling wifi"
+                  - wifi.enable:
+                else:
+                  - lambda: sntp_synched = true;
+                  - if: 
+                      condition:
+                        - binary_sensor.is_off: ac_powered
+                      then:
+                        - logger.log: "Disabling wifi"
+                        - wifi.disable:
   - id: update_screen
     then:
       while:
         condition: 
-          lambda: return true;
+          - lambda: return true;
         then:
           - if:
               condition: 
@@ -455,7 +434,7 @@ script:
                   - binary_sensor.is_off: charging_sensor
                   - binary_sensor.is_off: fully_charged
                   - not: 
-                      script.is_running: sntp_sync
+                      - lambda: return id(sntp_time)->is_in_progress();
                   - not: 
                       display_menu.is_active:
                   - not:
@@ -821,14 +800,6 @@ binary_sensor:
       return id(fully_charged).state || id(charging_sensor).state;
     on_press: 
       wifi.enable:
-    on_release:
-      if:
-        condition:
-          not:
-            script.is_running: sntp_sync
-        then:
-          - logger.log: "Disabling wifi 2"
-          - wifi.disable:
 
 text:
   - platform: template
@@ -1089,12 +1060,6 @@ display:
       if(!wifi->is_disabled() && !wifi->is_connected()) {
         it.set_on(true);
         it.print("WIFI");
-        return;
-      }
-
-      if (id(sntp_sync)->is_running()) {
-        it.set_on(true);
-        it.print("sync");
         return;
       }
 
