@@ -1,46 +1,52 @@
 #pragma once
 
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/time.h"
-#include "esphome/components/time/automation.h"
+
+#include "esphome/components/time/real_time_clock.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 
 namespace esphome {
 namespace daily_signal {
 
+using seconds_type = uint32_t;
+
 struct CronRTCData {
+  ESPTime next_signal;
   optional<ESPTime> last_check;
 };
 
-class CronTrigger : public time::CronTrigger {
+class SignalTrigger : public Trigger<>, public Component  {
 public:
-  CronTrigger(time::RealTimeClock *time_source);
+  SignalTrigger(time::RealTimeClock *rtc);
+  bool set_signal_time(uint8_t hour, uint8_t minute);
+  void unset_signal_time();
+  optional<seconds_type> get_seconds_remain() const;
   void loop() override;
 
 protected:
+  time::RealTimeClock *rtc_ = nullptr;
   CronRTCData& rtcData_;
-};
-
-class SignalTrigger : public CronTrigger {
-public:
-  SignalTrigger(time::RealTimeClock *rtc) : CronTrigger(rtc) {}
-  bool set_signal_time(uint8_t hour, uint8_t minute);
-  void unset_signal_time();
+  bool is_set_ = false;
 };
 
 class SignalComponent : public Component {
 public:
+  using seconds_type = esphome::daily_signal::seconds_type;
   bool set_signal_time(const std::string &time_string);
   // const std::string &get_signal_time_string() const { return time_string_; }
   void set_trigger(SignalTrigger *trigger);
-  void set_time(time::RealTimeClock *clock);
+  optional<seconds_type> get_seconds_remain() const {
+    return trigger_ ? trigger_->get_seconds_remain() : optional<seconds_type>{};
+  }
 
 protected:
   SignalTrigger *trigger_ = nullptr;
-  time::RealTimeClock *_clock = nullptr;
 };
 
 } // namespace daily_signal

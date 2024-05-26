@@ -11,19 +11,18 @@ esp32:
       # CONFIG_FREERTOS_USE_TICKLESS_IDLE: y
       CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP: y
       # CONFIG_PM_USE_RTC_TIMER_REF: y
-      CONFIG_PM_DFS_INIT_AUTO: y
+      # CONFIG_PM_DFS_INIT_AUTO: y
       # CONFIG_ESP_INT_WDT: n
 
 # Enable logging
 logger:
   level: INFO
   # level: DEBUG
-  # logs: 
+  # logs:
   #   number: INFO
   #   timer: INFO
   #   text: INFO
   #   sensor: INFO
-    
 
 external_components:
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
@@ -64,6 +63,7 @@ substitutions:
   timer_list_sound: "id(timer_1_sound), id(timer_2_sound), id(timer_3_sound), id(timer_4_sound), id(timer_5_sound), id(timer_6_sound), id(timer_7_sound), id(timer_8_sound)"
   timer_list: "id(timer_1_timer), id(timer_2_timer), id(timer_3_timer), id(timer_4_timer), id(timer_5_timer), id(timer_6_timer), id(timer_7_timer), id(timer_8_timer)"
   signal_list_sound: "id(signal_1_sound), id(signal_2_sound), id(signal_3_sound), id(signal_4_sound), id(signal_5_sound), id(signal_6_sound), id(signal_7_sound), id(signal_8_sound)"
+  signal_list: "id(signal_1_daily_signal), id(signal_2_daily_signal), id(signal_3_daily_signal), id(signal_4_daily_signal), id(signal_5_daily_signal), id(signal_6_daily_signal), id(signal_7_daily_signal), id(signal_8_daily_signal)"
 
 esphome:
   name: kitchen-timer
@@ -291,7 +291,7 @@ time:
   - platform: sntp
     id: sntp_time
     timezone: ${timezone}
-              
+
 switch:
   - platform: gpio
     id: power_saving
@@ -337,7 +337,7 @@ output:
     pin:
       number: ${passive_buzzer_pin}
       inverted: False
-      mode: 
+      mode:
         open_drain: True
         output: True
 
@@ -388,20 +388,20 @@ script:
   - id: wifi_for_sync
     mode: single
     then:
-      - while: 
-          condition: 
+      - while:
+          condition:
             - lambda: return true;
           then:
             - delay: 100ms
-            - if: 
-                condition: 
+            - if:
+                condition:
                   - lambda: return id(sntp_time)->is_in_progress();
                 then:
                   - logger.log: "Enabling wifi"
                   - wifi.enable:
                 else:
                   - lambda: sntp_synched = true;
-                  - if: 
+                  - if:
                       condition:
                         - binary_sensor.is_off: ac_powered
                       then:
@@ -410,11 +410,11 @@ script:
   - id: update_screen
     then:
       while:
-        condition: 
+        condition:
           - lambda: return true;
         then:
           - if:
-              condition: 
+              condition:
                 - lambda: return clock_updater.can_update();
               then:
                 - script.execute: tick_sound
@@ -423,7 +423,7 @@ script:
                     clock_updater.mark_updated();
                     // id(tm1637_display).display();
                 - component.update: tm1637_display
-                - wait_until: 
+                - wait_until:
                     condition:
                       not:
                         - script.is_running: tick_sound
@@ -433,9 +433,9 @@ script:
                   - binary_sensor.is_off: encoder_button
                   - binary_sensor.is_off: charging_sensor
                   - binary_sensor.is_off: fully_charged
-                  - not: 
+                  - not:
                       - lambda: return id(sntp_time)->is_in_progress();
-                  - not: 
+                  - not:
                       display_menu.is_active:
                   - not:
                       - wifi.enabled:
@@ -566,8 +566,7 @@ script:
                     // id(tm1637_display).start_poller();
               else:
                 - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
-  
-              
+
 sensor:
   - platform: debug
     free:
@@ -775,6 +774,29 @@ binary_sensor:
           - ON for at least 2s
         then:
           - display_menu.hide
+    on_double_click:
+      then:
+        - lambda: |
+            optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
+            optional<uint32_t> smallest_signal = closest_timer_il({${signal_list}});
+            const auto& smallest = [&]() -> optional<uint32_t> {
+              if(smallest_timer && smallest_signal)
+                return std::min(*smallest_signal, *smallest_timer);
+              if(smallest_timer)
+                return smallest_timer;
+              return smallest_signal;
+            }();
+
+            id(tm1637_display).set_on(false);
+            id(tm1637_display).display();
+            id(tm1637_display).update();
+            
+            if(smallest) {
+               id(deep_sleep_component).set_sleep_duration(*smallest * 1000);
+            }
+
+            id(deep_sleep_component).begin_sleep(true);
+
   - platform: gpio
     name: Power Charging
     id: charging_sensor
@@ -798,7 +820,7 @@ binary_sensor:
     id: ac_powered
     lambda: |
       return id(fully_charged).state || id(charging_sensor).state;
-    on_press: 
+    on_press:
       wifi.enable:
 
 text:
@@ -1042,7 +1064,6 @@ display:
   intensity: 7
   lambda: |-
     if (id(menu).is_active()) {
-      it.set_on(true);
       id(menu).draw();
       return;
     }
@@ -1050,7 +1071,6 @@ display:
     optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
 
     if(smallest_timer) {
-      it.set_on(true);
       it.printf("%s", timer_value_string(*smallest_timer).c_str());
       return;
     }
@@ -1058,13 +1078,11 @@ display:
     if(!id(semicolon_on)) {
       auto && wifi = id(wifi_component);
       if(!wifi->is_disabled() && !wifi->is_connected()) {
-        it.set_on(true);
         it.print("WIFI");
         return;
       }
 
       if (id(sntp_time)->is_in_progress()) {
-        it.set_on(true);
         it.print("sntp");
         return;
       }
@@ -1074,7 +1092,7 @@ display:
     const auto now = id(sntp_time).now();
 
     it.strftime(id(semicolon_on) ? "%H.%M": "%H%M", now);
-    
+
 
     // id(deep_sleep_component).allow_deep_sleep();
 

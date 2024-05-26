@@ -36,7 +36,6 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     clock = await cg.get_variable(config[CONF_TIME_ID])
-    cg.add(var.set_time(clock))
 
     await cg.register_component(var, config)
     
