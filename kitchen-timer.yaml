@@ -777,6 +777,19 @@ binary_sensor:
     on_double_click:
       then:
         - lambda: |
+            id(tm1637_display).set_on(false);
+            id(tm1637_display).display();
+            id(tm1637_display).update();
+        - wait_until:
+            condition:
+              - binary_sensor.is_off: encoder_button
+        - lambda: |
+            auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+            if(result != ESP_OK) {
+              ESP_LOGE(TAG, "Can't disable timer wakeup sources, error: %d", result);
+              return;
+            }
+            
             optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
             optional<uint32_t> smallest_signal = closest_timer_il({${signal_list}});
             const auto& smallest = [&]() -> optional<uint32_t> {
@@ -786,16 +799,29 @@ binary_sensor:
                 return smallest_timer;
               return smallest_signal;
             }();
-
-            id(tm1637_display).set_on(false);
-            id(tm1637_display).display();
-            id(tm1637_display).update();
-            
+    
             if(smallest) {
-               id(deep_sleep_component).set_sleep_duration(*smallest * 1000);
+              result = esp_sleep_enable_timer_wakeup(*smallest * 1000 * 1000);
+              if(result != ESP_OK) {
+                ESP_LOGE(TAG, "Can't enable timer wakeup, error: %d", result);
+                return;
+              }
             }
 
-            id(deep_sleep_component).begin_sleep(true);
+            uint64_t mask = (1 << $rotary_encoder_button_pin);
+            if(id(ac_powered).state == false) {
+              ESP_LOGI(TAG, "Battery powered, will wake up on power up");
+              mask |= (1 << $charging_pin) | (1 << $fully_charged_pin);
+            }
+
+            result = esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW);
+            if(result != ESP_OK) {
+              ESP_LOGE(TAG, "enable deep seep GPIO wake up, error: %d", result);
+              return;
+            }
+
+            App.run_safe_shutdown_hooks();
+            esp_deep_sleep_start();
 
   - platform: gpio
     name: Power Charging
