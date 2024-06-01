@@ -16,13 +16,13 @@ esp32:
 
 # Enable logging
 logger:
-  level: INFO
-  # level: DEBUG
-  # logs:
-  #   number: INFO
-  #   timer: INFO
-  #   text: INFO
-  #   sensor: INFO
+  # level: INFO
+  level: DEBUG
+  logs:
+    number: INFO
+    timer: INFO
+    text: INFO
+    sensor: INFO
 
 external_components:
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
@@ -64,6 +64,7 @@ substitutions:
   timer_list: "id(timer_1_timer), id(timer_2_timer), id(timer_3_timer), id(timer_4_timer), id(timer_5_timer), id(timer_6_timer), id(timer_7_timer), id(timer_8_timer)"
   signal_list_sound: "id(signal_1_sound), id(signal_2_sound), id(signal_3_sound), id(signal_4_sound), id(signal_5_sound), id(signal_6_sound), id(signal_7_sound), id(signal_8_sound)"
   signal_list: "id(signal_1_daily_signal), id(signal_2_daily_signal), id(signal_3_daily_signal), id(signal_4_daily_signal), id(signal_5_daily_signal), id(signal_6_daily_signal), id(signal_7_daily_signal), id(signal_8_daily_signal)"
+  menu_text_back: "НАЗА"
 
 esphome:
   name: kitchen-timer
@@ -86,6 +87,7 @@ esphome:
     then:
       - deep_sleep.prevent: deep_sleep_component
       - lambda: |
+          esp_task_wdt_init(1500, false);
           setenv("TZ", "${timezone}", 1);
           tzset();
       - lambda: |
@@ -103,14 +105,23 @@ esphome:
       - script.execute: wifi_for_sync
 
 globals:
+  - id: menu_exit_request
+    type: bool
+    initial_value: "false"
+  - id: signal_stop_request
+    type: bool
+    initial_value: "false"
   - id: signal_message
     type: std::vector<std::string>
+  - id: signal_song_index
+    type: size_t
+    initial_value: "static_cast<size_t>(-1)"
   - id: time_sync_in_progress
     type: bool
     initial_value: "false"
-  - id: semicolon_on
-    type: bool
-    initial_value: "false"
+  - id: frame
+    type: uint8_t
+    initial_value: "0"
   - id: recent_timers
     type: std::array<esphome::timer::seconds_type, 8>
     restore_value: True
@@ -354,33 +365,34 @@ i2c:
 script:
   - id: play_signal
     mode: queued
-    parameters: 
-      song: string
-      message: string[]
     then:
-      - globals.set: 
-          id: signal_message
-          value: !lambda return message;
-      - while:
+      - lambda: |
+          const auto item = alarms::pop();
+          id(signal_song_index) = item ? item->song_index : static_cast<size_t>(-1);
+          id(signal_message) = item ? std::move(item->message) : std::vector<std::string>();
+          id(signal_stop_request) = false;
+
+          if(id(signal_song_index) > id(songs).size()) {
+            ESP_LOGD(TAG, "Nothing to play");
+            id(play_signal).stop();
+          } else {
+            ESP_LOGI(TAG, "Starting to play song %d", id(signal_song_index));
+            // schedule another song play
+            id(play_signal).execute();
+            const auto messages = id(signal_message).size();
+            id(frame) = -1;
+          }          
+      - wait_until:
           condition:
-            - binary_sensor.is_off: encoder_button
-          then:
-            - rtttl.play: !lambda return song;
-            - wait_until:
-                condition: 
-                  or:
-                    - binary_sensor.is_on: encoder_button
-                    - not:
-                        rtttl.is_playing:
-            - if:
-                condition: 
-                  - binary_sensor.is_off: encoder_button
-                then:
-                  - delay: 1s
-      - globals.set: 
-          id: signal_message
-          value: !lambda |
-            return std::vector<std::string>{};
+            - lambda:
+                return id(signal_stop_request);
+          timeout: 
+            minutes: 5
+      - lambda: |
+          ESP_LOGD(TAG, "Stop playing signal %d", id(signal_song_index));
+          id(signal_song_index) = static_cast<size_t>(-1);
+          id(signal_message).clear();
+      - rtttl.stop:
   - id: rotary_click
     mode: queued
     then:
@@ -414,7 +426,13 @@ script:
   - id: auto_menu_exit
     mode: restart
     then:
-      - delay: 60s
+      - wait_until:
+          condition:
+            - lambda: return id(menu_exit_request);
+          timeout: 60s
+      - globals.set: 
+          id: menu_exit_request
+          value: "false"
       - display_menu.hide:
   - id: wifi_for_sync
     mode: single
@@ -426,10 +444,15 @@ script:
             - delay: 100ms
             - if:
                 condition:
-                  - lambda: return id(sntp_time)->is_in_progress();
+                    - lambda: return id(sntp_time)->is_in_progress();
                 then:
-                  - logger.log: "Enabling wifi"
-                  - wifi.enable:
+                  if:
+                    condition: 
+                      - not:
+                        - wifi.enabled:
+                    then:
+                      - logger.log: "Enabling wifi"
+                      - wifi.enable:
                 else:
                   - lambda: sntp_synched = true;
                   - if:
@@ -448,16 +471,33 @@ script:
               condition:
                 - lambda: return clock_updater.can_update();
               then:
+                - logger.log:
+                    level: DEBUG
+                    format: Updating screen
                 - script.execute: tick_sound
                 - lambda: |
-                    id(semicolon_on) = !id(semicolon_on);
+                    ++id(frame);
                     clock_updater.mark_updated();
                     // id(tm1637_display).display();
+                - logger.log:
+                    level: DEBUG
+                    format: Frame is %d.
+                    args:
+                      - id(frame)
                 - component.update: tm1637_display
                 - wait_until:
                     condition:
                       not:
                         - script.is_running: tick_sound
+                - lambda: |
+                    ESP_LOGD(TAG, "Checking the song");
+                    const auto& song_index = id(signal_song_index);
+                    if(song_index < id(songs).size() && !id(my_rtttl).is_playing()) {
+                      ESP_LOGD(TAG, "Start song playing");
+                      id(my_rtttl).play(id(songs)[song_index]);
+                    }
+          - component.update: light_sensor
+          - delay: 1ms # to process other sensor loops
           - if:
               condition:
                 and:
@@ -470,10 +510,11 @@ script:
                       display_menu.is_active:
                   - not:
                       - wifi.enabled:
+                  - not:
+                      - script.is_running: play_signal
               then:
-                - component.update: light_sensor
-                - delay: 1ms # to process other sensor loops
                 - lambda: |
+                    ESP_LOGD(TAG, "Light sleep attempt");
                     static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
                       gpio_num_t($rotary_encoder_button_pin),
                       gpio_num_t($charging_pin),
@@ -621,23 +662,39 @@ sensor:
       inverted: True
       number: ${rotary_encoder_b_pin}
     on_anticlockwise:
-      - script.execute: auto_menu_exit
-      - if:
+      - if: 
           condition:
-            display_menu.is_active:
+            - script.is_running: play_signal
           then:
-            - display_menu.down:
+            # - globals.set: 
+            #     id: signal_stop_request
+            #     value: !lambda return true;
           else:
-            - display_menu.show_main:
+            - script.execute: auto_menu_exit
+            - if:
+                condition:
+                  display_menu.is_active:
+                then:
+                  - display_menu.down:
+                else:
+                  - display_menu.show_main:
     on_clockwise:
-      - script.execute: auto_menu_exit
-      - if:
-          condition:
-            display_menu.is_active:
-          then:
-            - display_menu.up:
-          else:
-            - display_menu.show_main:
+      if: 
+        condition:
+          - script.is_running: play_signal
+        then:
+          # - globals.set: 
+          #     id: signal_stop_request
+          #     value: !lambda return true;
+        else:
+          - script.execute: auto_menu_exit
+          - if:
+              condition:
+                display_menu.is_active:
+              then:
+                - display_menu.up:
+              else:
+                - display_menu.show_main:
     on_value:
       then:
         - script.execute: rotary_click
@@ -699,7 +756,7 @@ sensor:
 
   - platform: adc
     pin: ${battery_voltage_pin}
-    attenuation: 11db
+    attenuation: 12db
     accuracy_decimals: 4
     update_interval: 1s
     id: battery_voltage_unfiltered
@@ -771,7 +828,10 @@ sensor:
 
   - platform: adc
     name: Power Charging Current
-    pin: ${charging_current_pin}
+    pin: 
+      number: ${charging_current_pin}
+      mode:
+        input: true
     device_class: current
     id: charging_current_fast
     attenuation: auto
@@ -791,68 +851,80 @@ binary_sensor:
       number: ${rotary_encoder_button_pin}
       inverted: True
     on_click:
-      then:
-        - script.execute: auto_menu_exit
-        - if:
-            condition:
-              display_menu.is_active:
-            then:
-              - display_menu.enter:
-            else:
-              - display_menu.show_main:
+      if: 
+        condition:
+          - script.is_running: play_signal
+        then:
+          - globals.set: 
+              id: signal_stop_request
+              value: !lambda return true;
+        else:
+          - script.execute: auto_menu_exit
+          - if:
+              condition:
+                display_menu.is_active:
+              then:
+                - display_menu.enter:
+              else:
+                - display_menu.show_main:
     on_multi_click:
       - timing:
           - ON for at least 2s
         then:
           - display_menu.hide
     on_double_click:
-      then:
-        - lambda: |
-            id(tm1637_display).set_on(false);
-            id(tm1637_display).display();
-            id(tm1637_display).update();
-        - wait_until:
-            condition:
-              - binary_sensor.is_off: encoder_button
-        - lambda: |
-            auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-            if(result != ESP_OK) {
-              ESP_LOGE(TAG, "Can't disable timer wakeup sources, error: %d", result);
-              return;
-            }
-            
-            optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
-            optional<uint32_t> smallest_signal = closest_timer_il({${signal_list}});
-            const auto& smallest = [&]() -> optional<uint32_t> {
-              if(smallest_timer && smallest_signal)
-                return std::min(*smallest_signal, *smallest_timer);
-              if(smallest_timer)
-                return smallest_timer;
-              return smallest_signal;
-            }();
-    
-            if(smallest) {
-              result = esp_sleep_enable_timer_wakeup(*smallest * 1000 * 1000);
+      if:
+        condition:
+          - display_menu.is_active:
+        then:
+          - display_menu.hide:
+        else:
+          - lambda: |
+              id(tm1637_display).set_on(false);
+              id(tm1637_display).display();
+              id(tm1637_display).update();
+          - wait_until:
+              condition:
+                - binary_sensor.is_off: encoder_button
+          - lambda: |
+              auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
               if(result != ESP_OK) {
-                ESP_LOGE(TAG, "Can't enable timer wakeup, error: %d", result);
+                ESP_LOGE(TAG, "Can't disable timer wakeup sources, error: %d", result);
                 return;
               }
-            }
+              
+              optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
+              optional<uint32_t> smallest_signal = closest_timer_il({${signal_list}});
+              const auto& smallest = [&]() -> optional<uint32_t> {
+                if(smallest_timer && smallest_signal)
+                  return std::min(*smallest_signal, *smallest_timer);
+                if(smallest_timer)
+                  return smallest_timer;
+                return smallest_signal;
+              }();
+      
+              if(smallest) {
+                result = esp_sleep_enable_timer_wakeup(*smallest * 1000 * 1000);
+                if(result != ESP_OK) {
+                  ESP_LOGE(TAG, "Can't enable timer wakeup, error: %d", result);
+                  return;
+                }
+              }
 
-            uint64_t mask = (1 << $rotary_encoder_button_pin);
-            if(id(ac_powered).state == false) {
-              ESP_LOGI(TAG, "Battery powered, will wake up on power up");
-              mask |= (1 << $charging_pin) | (1 << $fully_charged_pin);
-            }
+              uint64_t mask = (1 << $rotary_encoder_button_pin);
+              if(id(ac_powered).state == false) {
+                ESP_LOGI(TAG, "Battery powered, will wake up on power up");
+                mask |= (1 << $charging_pin) | (1 << $fully_charged_pin);
+              }
 
-            result = esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW);
-            if(result != ESP_OK) {
-              ESP_LOGE(TAG, "enable deep seep GPIO wake up, error: %d", result);
-              return;
-            }
+              result = esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW);
+              if(result != ESP_OK) {
+                ESP_LOGE(TAG, "enable deep seep GPIO wake up, error: %d", result);
+                return;
+              }
 
-            App.run_safe_shutdown_hooks();
-            esp_deep_sleep_start();
+              App.run_safe_shutdown_hooks();
+              esp_deep_sleep_start();
 
   - platform: gpio
     name: Power Charging
@@ -880,14 +952,14 @@ binary_sensor:
     on_press:
       wifi.enable:
 
-text:
-  - platform: template
-    name: Sound Add
-    id: rtttl_text
-    optimistic: true
-    mode: text
-    restore_value: True
-    initial_value: "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e"
+# text:
+#   - platform: template
+#     name: Sound Add
+#     id: rtttl_text
+#     optimistic: true
+#     mode: text
+#     restore_value: True
+#     initial_value: "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e"
 
 button:
   - platform: restart
@@ -900,19 +972,19 @@ button:
         - deep_sleep.enter:
             id: deep_sleep_component
             sleep_duration: 5s
-  - platform: template
-    name: Sound Play
-    on_press:
-      then:
-        - if:
-            condition: rtttl.is_playing
-            then:
-              - rtttl.stop:
-            else:
-              - rtttl.play: !lambda |
-                  // boomer:d=4,o=2,b=125:8e2,4g2,2p,8g2,4e2,2p,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b2,2p
-                  // boomer:d=4,o=2,b=125:8e2,4g2.,2p-,8g2,4e2.,2p-,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b.,2p-
-                  return id(rtttl_text).state;
+  # - platform: template
+  #   name: Sound Play
+  #   on_press:
+  #     then:
+  #       - if:
+  #           condition: rtttl.is_playing
+  #           then:
+  #             - rtttl.stop:
+  #           else:
+  #             - rtttl.play: !lambda |
+  #                 // boomer:d=4,o=2,b=125:8e2,4g2,2p,8g2,4e2,2p,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b2,2p
+  #                 // boomer:d=4,o=2,b=125:8e2,4g2.,2p-,8g2,4e2.,2p-,8a2,8g2,8a2,8g2,8a2,8g2,8a2,8g2,8a2,4b.,2p-
+  #                 return id(rtttl_text).state;
 
 number:
   - platform: template
@@ -974,10 +1046,11 @@ lcd_menu_7segment:
         - type: custom
           text: "СТАРТ"
           value_lambda: |
-            return timer_value_string(
-              id(menu_recent_timer) < id(recent_timers).size() 
+            const auto& seconds = id(menu_recent_timer) < id(recent_timers).size() 
                 ? id(recent_timers)[id(menu_recent_timer)] 
-                : *menu_new_timer_iterator);
+                : *menu_new_timer_iterator;
+            if(seconds == 0) return "$menu_text_back";
+            return timer_value_string(seconds);
           on_enter:
             then:
               lambda: |
@@ -985,17 +1058,24 @@ lcd_menu_7segment:
                 menu_new_timer_iterator = TimerValueIterator{};
           on_leave:
             lambda: |
+              ESP_LOGD(TAG, "Leaving start timer menu");
               const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
               auto i_free_timer = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
                 return !timer->get_seconds_remain();
               });
-              if(i_free_timer == timer_list.end()) return;
+              if(i_free_timer == timer_list.end()) {
+                ESP_LOGE(TAG, "Can't find free timer");
+                return;
+              }
               auto seconds = id(menu_recent_timer) < id(recent_timers).size() 
                 ? id(recent_timers)[id(menu_recent_timer)] 
                 : *menu_new_timer_iterator;
-              (*i_free_timer)->start(seconds);
-              if(seconds)
+              if(seconds) {
+                ESP_LOGD(TAG, "Starting a timer for %d seconds", seconds);
+                (*i_free_timer)->start(seconds);
                 add_to_recent_timers(id(recent_timers), seconds);
+                id(menu_exit_request) = true;
+              }
           on_next:
             then:
               lambda: |
@@ -1030,7 +1110,7 @@ lcd_menu_7segment:
         - type: custom
           text: "СТОП"
           value_lambda: |
-            if(id(menu_current_running_timer_component) == nullptr) return "НАЗАД";
+            if(id(menu_current_running_timer_component) == nullptr) return "$menu_text_back";
             const auto& seconds_remain = id(menu_current_running_timer_component)->get_seconds_remain();
             return timer_value_string(seconds_remain ? *seconds_remain : 0);
           on_enter:
@@ -1120,57 +1200,47 @@ display:
   update_interval: never
   intensity: 7
   lambda: |-
-    if (id(menu).is_active()) {
-      id(menu).draw();
-      return;
-    }
-
-    optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
-
-    if(smallest_timer) {
-      it.printf("%s", timer_value_string(*smallest_timer).c_str());
-      return;
-    }
-
+    ESP_LOGD(TAG, "Displaying");
     if(!id(signal_message).empty()) {
-      const auto& message = id(signal_message)[(id(semicolon_on) ? 1 : 0) % id(signal_message).size()];
+      ESP_LOGD(TAG, "Figuring out the message");
+      const auto& message = id(signal_message)[id(frame) % id(signal_message).size()];
+      ESP_LOGD(TAG, "Showing message %s", message.c_str());
       it.printf("%s", message.c_str());
       return;
     }
 
-    if(!id(semicolon_on)) {
+    if (id(menu).is_active()) {
+      ESP_LOGD(TAG, "Drawing menu");
+      id(menu).draw();
+      return;
+    }
+
+    ESP_LOGD(TAG, "Looking for closest timer");
+    optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
+
+    if(smallest_timer) {
+      ESP_LOGD(TAG, "Showing timer %d", *smallest_timer);
+      it.printf("%s", timer_value_string(*smallest_timer).c_str());
+      return;
+    }
+
+    if(id(frame ) % 2) {
+      ESP_LOGD(TAG, "Checking system messages");
       auto && wifi = id(wifi_component);
       if(!wifi->is_disabled() && !wifi->is_connected()) {
+        ESP_LOGD(TAG, "Printing WIFI");
         it.print("WIFI");
         return;
       }
 
       if (id(sntp_time)->is_in_progress()) {
+        ESP_LOGD(TAG, "Printing SMTP");
         it.print("sntp");
         return;
       }
     }
 
-
+    ESP_LOGD(TAG, "Showing current time");
     const auto now = id(sntp_time).now();
 
-    it.strftime(id(semicolon_on) ? "%H.%M": "%H%M", now);
-
-
-    // id(deep_sleep_component).allow_deep_sleep();
-
-    // id(tm1637_display).update();
-
-    // id(deep_sleep_component).set_sleep_duration(500);
-    // id(deep_sleep_component).begin_sleep(false);
-
-    // if(id(enable_sleeping)) {
-      // App.run_safe_shutdown_hooks();
-      // for(const auto& gpio: std::initializer_list<gpio_num_t>{ GPIO_NUM_10, GPIO_NUM_21, GPIO_NUM_20 }) {
-      //  ESP_ERROR_CHECK(gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL));
-      //}
-      //ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(60*1000*1000));
-      //ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
-      //ESP_ERROR_CHECK(esp_light_sleep_start());
-
-    // }
+    it.strftime((id(frame) % 2) == 0 ? "%H.%M": "%H%M", now);

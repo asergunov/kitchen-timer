@@ -1,18 +1,65 @@
 #pragma once
 
 #include "esp_attr.h"
-#include "esp_task_wdt.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
+#include "esp_task_wdt.h"
 
 #include <cstdint>
 #include <iterator>
+#include <queue>
 #include <string>
 #include <vector>
 
 bool RTC_DATA_ATTR sntp_synched = false;
 
 static const char *const TAG = "kitchen-timer";
+
+namespace alarms {
+namespace schedule {
+
+struct Item {
+  std::vector<std::string> message;
+  uint8_t song_index;
+};
+
+using Queue = std::queue<Item>;
+
+Queue queue;
+
+} // namespace schedule
+
+bool is_firing() {
+  return !schedule::queue.empty() || play_signal->is_running();
+}
+
+void push(uint8_t song_index, std::vector<std::string> message) {
+  schedule::queue.push(
+      schedule::Item{.message = std::move(message), .song_index = song_index});
+  if(!play_signal->is_running()) {
+    play_signal->execute();
+  }
+}
+
+optional<schedule::Item> pop() {
+  optional<schedule::Item> result;
+  if(!schedule::queue.empty()) {
+    result = std::move(schedule::queue.front());
+    schedule::queue.pop();
+  }
+  return result;
+}
+
+} // namespace alarms
+
+const std::string& song_by_index(const size_t& index) {
+  static const std::string empty;
+  return index < songs->value().size() ? songs->value()[index] : empty;
+}
+
+const std::string& song_by_index(const optional<size_t>& index) {
+  return index ? song_by_index(*index) : song_by_index(static_cast<size_t>(-1));
+}
 
 std::vector<std::string>
 get_song_name_list(const std::vector<std::string> &_songs) {
@@ -204,7 +251,7 @@ public:
   }
 
   uint64_t to_useconds() const {
-    return uint64_t(tv_sec)*1000000 + uint64_t(tv_usec);
+    return uint64_t(tv_sec) * 1000000 + uint64_t(tv_usec);
   }
 
   TimeVal operator%(const TimeVal rhs) const {
@@ -232,11 +279,12 @@ public:
   }
 
   bool can_update() const {
-    return next_update_ < TimeVal::now() + TimeVal::from_milliseconds(update_interval_ms_ * 1 / 8);
+    return next_update_ < TimeVal::now() + TimeVal::from_milliseconds(
+                                               update_interval_ms_ * 1 / 8);
   }
 
   uint64_t useconds_to_update() const {
-    const auto& now = TimeVal::now();
+    const auto &now = TimeVal::now();
     return next_update_ < now ? 0 : (next_update_ - now).to_useconds();
   }
 
@@ -247,7 +295,7 @@ public:
         TimeVal::from_milliseconds(update_interval_ms_);
     next_update_ += update_interval;
 
-    if(next_update_ + update_interval + update_interval < now) {
+    if (next_update_ + update_interval + update_interval < now) {
       reset_next_update();
     }
   }
