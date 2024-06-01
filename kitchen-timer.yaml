@@ -16,13 +16,13 @@ esp32:
 
 # Enable logging
 logger:
-  # level: INFO
-  level: DEBUG
-  logs:
-    number: INFO
-    timer: INFO
-    text: INFO
-    sensor: INFO
+  level: INFO
+  # level: DEBUG
+  # logs:
+  #   number: INFO
+  #   timer: INFO
+  #   text: INFO
+  #   sensor: INFO
 
 external_components:
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
@@ -363,6 +363,55 @@ i2c:
     scl: 9
 
 script:
+  - id: deep_sleep_start
+    mode: single
+    then:
+      - lambda: |
+          id(tm1637_display).set_on(false);
+          id(tm1637_display).display();
+          id(tm1637_display).update();
+      - wait_until:
+          condition:
+            - binary_sensor.is_off: encoder_button
+      - lambda: |
+          auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+          if(result != ESP_OK) {
+            ESP_LOGE(TAG, "Can't disable timer wakeup sources, error: %d", result);
+            return;
+          }
+          
+          optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
+          optional<uint32_t> smallest_signal = closest_timer_il({${signal_list}});
+          const auto& smallest = [&]() -> optional<uint32_t> {
+            if(smallest_timer && smallest_signal)
+              return std::min(*smallest_signal, *smallest_timer);
+            if(smallest_timer)
+              return smallest_timer;
+            return smallest_signal;
+          }();
+  
+          if(smallest) {
+            result = esp_sleep_enable_timer_wakeup(*smallest * 1000 * 1000);
+            if(result != ESP_OK) {
+              ESP_LOGE(TAG, "Can't enable timer wakeup, error: %d", result);
+              return;
+            }
+          }
+
+          uint64_t mask = (1 << $rotary_encoder_button_pin);
+          if(id(ac_powered).state == false) {
+            ESP_LOGI(TAG, "Battery powered, will wake up on power up");
+            mask |= (1 << $charging_pin) | (1 << $fully_charged_pin);
+          }
+
+          result = esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW);
+          if(result != ESP_OK) {
+            ESP_LOGE(TAG, "enable deep seep GPIO wake up, error: %d", result);
+            return;
+          }
+
+          App.run_safe_shutdown_hooks();
+          esp_deep_sleep_start();
   - id: play_signal
     mode: queued
     then:
@@ -871,61 +920,13 @@ binary_sensor:
       - timing:
           - ON for at least 2s
         then:
-          - display_menu.hide
-    on_double_click:
-      if:
-        condition:
-          - display_menu.is_active:
-        then:
-          - display_menu.hide:
-        else:
-          - lambda: |
-              id(tm1637_display).set_on(false);
-              id(tm1637_display).display();
-              id(tm1637_display).update();
-          - wait_until:
-              condition:
-                - binary_sensor.is_off: encoder_button
-          - lambda: |
-              auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-              if(result != ESP_OK) {
-                ESP_LOGE(TAG, "Can't disable timer wakeup sources, error: %d", result);
-                return;
-              }
-              
-              optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
-              optional<uint32_t> smallest_signal = closest_timer_il({${signal_list}});
-              const auto& smallest = [&]() -> optional<uint32_t> {
-                if(smallest_timer && smallest_signal)
-                  return std::min(*smallest_signal, *smallest_timer);
-                if(smallest_timer)
-                  return smallest_timer;
-                return smallest_signal;
-              }();
-      
-              if(smallest) {
-                result = esp_sleep_enable_timer_wakeup(*smallest * 1000 * 1000);
-                if(result != ESP_OK) {
-                  ESP_LOGE(TAG, "Can't enable timer wakeup, error: %d", result);
-                  return;
-                }
-              }
-
-              uint64_t mask = (1 << $rotary_encoder_button_pin);
-              if(id(ac_powered).state == false) {
-                ESP_LOGI(TAG, "Battery powered, will wake up on power up");
-                mask |= (1 << $charging_pin) | (1 << $fully_charged_pin);
-              }
-
-              result = esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW);
-              if(result != ESP_OK) {
-                ESP_LOGE(TAG, "enable deep seep GPIO wake up, error: %d", result);
-                return;
-              }
-
-              App.run_safe_shutdown_hooks();
-              esp_deep_sleep_start();
-
+          if:
+            condition:
+              - display_menu.is_active:
+            then:
+              - display_menu.hide:
+            else:
+              - script.execute: deep_sleep_start   
   - platform: gpio
     name: Power Charging
     id: charging_sensor
