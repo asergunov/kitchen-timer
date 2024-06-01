@@ -103,6 +103,8 @@ esphome:
       - script.execute: wifi_for_sync
 
 globals:
+  - id: signal_message
+    type: std::vector<std::string>
   - id: time_sync_in_progress
     type: bool
     initial_value: "false"
@@ -350,6 +352,35 @@ i2c:
     scl: 9
 
 script:
+  - id: play_signal
+    mode: queued
+    parameters: 
+      song: string
+      message: string[]
+    then:
+      - globals.set: 
+          id: signal_message
+          value: !lambda return message;
+      - while:
+          condition:
+            - binary_sensor.is_off: encoder_button
+          then:
+            - rtttl.play: !lambda return song;
+            - wait_until:
+                condition: 
+                  or:
+                    - binary_sensor.is_on: encoder_button
+                    - not:
+                        rtttl.is_playing:
+            - if:
+                condition: 
+                  - binary_sensor.is_off: encoder_button
+                then:
+                  - delay: 1s
+      - globals.set: 
+          id: signal_message
+          value: !lambda |
+            return std::vector<std::string>{};
   - id: rotary_click
     mode: queued
     then:
@@ -1098,6 +1129,12 @@ display:
 
     if(smallest_timer) {
       it.printf("%s", timer_value_string(*smallest_timer).c_str());
+      return;
+    }
+
+    if(!id(signal_message).empty()) {
+      const auto& message = id(signal_message)[(id(semicolon_on) ? 1 : 0) % id(signal_message).size()];
+      it.printf("%s", message.c_str());
       return;
     }
 

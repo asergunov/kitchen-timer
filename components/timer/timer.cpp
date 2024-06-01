@@ -15,11 +15,13 @@ static const char *const TAG = "timer";
 constexpr uint8_t g_maxTimers = 16;
 bool RTC_DATA_ATTR g_timerRtcData_active[g_maxTimers];
 time_t RTC_DATA_ATTR g_timerRtcData_timestamp[g_maxTimers];
+seconds_type RTC_DATA_ATTR g_timerRtcData_start_seconds[g_maxTimers];
 uint8_t g_nextFreeTimerRtcData = 0;
 
 TimerTrigger::TimerTrigger(time::RealTimeClock *rtc)
     : rtc_(rtc), active_(g_timerRtcData_active[g_nextFreeTimerRtcData]),
-      timestamp_(g_timerRtcData_timestamp[g_nextFreeTimerRtcData]) {
+      timestamp_(g_timerRtcData_timestamp[g_nextFreeTimerRtcData]),
+      start_seconds_(g_timerRtcData_start_seconds[g_nextFreeTimerRtcData]) {
   if(g_nextFreeTimerRtcData++ == g_maxTimers) {
     ESP_LOGE(TAG, "g_maxTimers exceed. Aborting.");
     abort();
@@ -30,6 +32,7 @@ TimerTrigger::TimerTrigger(time::RealTimeClock *rtc)
 
 void TimerTrigger::start(TimerTrigger::seconds_type seconds) {
   ESP_LOGI(TAG, "Starting a trigger for %u seconds", seconds);
+  start_seconds_ = seconds;
   const auto &now = rtc_->now();
   if (seconds <= 0) {
     active_ = false;

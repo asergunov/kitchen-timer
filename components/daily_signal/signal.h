@@ -28,6 +28,9 @@ public:
   void unset_signal_time();
   optional<seconds_type> get_seconds_remain() const;
   void loop() override;
+  const ESPTime& get_signal_time() const {
+    return rtcData_.next_signal;
+  }
 
 protected:
   time::RealTimeClock *rtc_ = nullptr;
@@ -43,6 +46,9 @@ public:
   void set_trigger(SignalTrigger *trigger);
   optional<seconds_type> get_seconds_remain() const {
     return trigger_ ? trigger_->get_seconds_remain() : optional<seconds_type>{};
+  }
+  const ESPTime& get_signal_time() const {
+    return trigger_->get_signal_time();
   }
 
 protected:

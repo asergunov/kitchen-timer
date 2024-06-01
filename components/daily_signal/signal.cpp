@@ -24,9 +24,11 @@ ESPTime next_signal_time(const ESPTime &time, const uint8_t hour,
   // Correct the
   signal_time.timestamp += ((int64_t(hour) - int64_t(signal_time.hour)) * 60 +
                             (int64_t(minute) - int64_t(signal_time.minute))) *
-                           60;
+                               60 -
+                           int64_t(signal_time.second);
   signal_time.hour = hour;
   signal_time.minute = minute;
+  signal_time.second = 0;
 
   return signal_time;
 }
