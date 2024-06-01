@@ -90,14 +90,16 @@ std::string timer_value_string(uint32_t seconds) {
   seconds %= (60 * 60);
   const auto minutes = seconds / 60;
   seconds %= 60;
-  if (hours > 99) {
+  if (minutes > 99) {
     std::snprintf(buffer, sizeof(buffer), "%3dh", hours);
   } else if (hours > 9) {
     std::snprintf(buffer, sizeof(buffer), "%2dh%d", hours, minutes);
   } else if (hours > 0) {
     std::snprintf(buffer, sizeof(buffer), "%1dh%02d", hours, minutes);
-  } else {
+  } else if (minutes > 0) {
     std::snprintf(buffer, sizeof(buffer), "%02d.%02d", minutes, seconds);
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "  .%02d", seconds);
   }
   return {buffer};
 }
