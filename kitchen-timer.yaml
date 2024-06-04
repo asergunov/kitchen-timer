@@ -13,12 +13,20 @@ esp32:
       # CONFIG_PM_USE_RTC_TIMER_REF: y
       # CONFIG_PM_DFS_INIT_AUTO: y
       # CONFIG_ESP_INT_WDT: n
+      CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
+      CONFIG_SNTP_TIME_SYNC_METHOD_CUSTOM: y
 
 # Enable logging
 logger:
   level: INFO
+  logs:
+    esp-idf: WARN
+    web_server_idf: ERROR # Suppress warnings
+  
   # level: DEBUG
   # logs:
+  #   # kitchen-timer: INFO
+  #   main: INFO
   #   number: INFO
   #   timer: INFO
   #   text: INFO
@@ -28,10 +36,6 @@ external_components:
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
     components:
       - rtttl
-    refresh: 0s
-  - source: "github://asergunov/esphome_esphome@sntp"
-    components:
-      - sntp
     refresh: 0s
   - source: "github://asergunov/esphome_esphome@7digits_display_menu"
     components:
@@ -49,17 +53,22 @@ external_components:
       - timer
 
 substitutions:
+  # 32KHz: 0,1
+  # ADC1: 0,1,2,3,4
+  # ADC2: 5
   display_clk_pin: "21"
   display_dio_pin: "10"
   power_sawing_pin: "20"
   passive_buzzer_pin: "6"
-  charging_current_pin: "3"
-  rotary_encoder_a_pin: "7"
-  rotary_encoder_b_pin: "4"
-  rotary_encoder_button_pin: "2"
-  battery_voltage_pin: "1"
-  charging_pin: "5"
-  fully_charged_pin: "0"
+  charging_current_pin: "4" # ADC1
+  rotary_encoder_a_pin: "18"
+  rotary_encoder_b_pin: "19"
+  rotary_encoder_button_pin: "2" # RTC
+  battery_voltage_pin: "3" # ADC1
+  charging_pin: "5" # RTC
+  fully_charged_pin: "7"
+  sda_pin: "8"
+  scl_pin: "9"
   timezone: "<+06>-6"
   timer_list_sound: "id(timer_1_sound), id(timer_2_sound), id(timer_3_sound), id(timer_4_sound), id(timer_5_sound), id(timer_6_sound), id(timer_7_sound), id(timer_8_sound)"
   timer_list: "id(timer_1_timer), id(timer_2_timer), id(timer_3_timer), id(timer_4_timer), id(timer_5_timer), id(timer_6_timer), id(timer_7_timer), id(timer_8_timer)"
@@ -100,8 +109,8 @@ esphome:
           }
       # - lambda: |
       #     App.set_loop_interval(100);
-      - script.execute: update_screen
-      - script.execute: wifi_for_sync
+      - script.execute: update_screen_loop
+      - script.execute: sntp_updater_loop
 
 globals:
   - id: menu_exit_request
@@ -278,6 +287,8 @@ wifi:
   enable_on_boot: False
   # fast_connect: True
   networks:
+    # - ssid: !secret anton_phone.wifi_ssid
+    #   password: !secret anton_phone.wifi_password
     - ssid: !secret parents.wifi_ssid
       password: !secret parents.wifi_password
     - ssid: !secret wifi_ssid
@@ -292,24 +303,41 @@ wifi:
 
 web_server:
   port: 80
+  version: 3
+
+wireguard:
+  id: wireguard_component
+  address: !secret kitchen_timer.wireguard.address
+  netmask: !secret kitchen_timer.wireguard.netmask
+  private_key: !secret kitchen_timer.wireguard.private_key
+  peer_public_key: !secret kitchen_timer.wireguard.peer_public_key
+  peer_preshared_key: !secret kitchen_timer.wireguard.peer_preshared_key
+  # peer_allowed_ips: 
+  #   - 192.168.1.0/24
+  #   - 192.168.2.0/24
+  peer_endpoint: !secret kitchen_timer.wireguard.peer_endpoint
+  peer_port: !secret kitchen_timer.wireguard.peer_port
+  peer_persistent_keepalive: !secret kitchen_timer.wireguard.peer_persistent_keepalive
 
 time:
   - platform: sntp
     id: sntp_time
     timezone: ${timezone}
-    update_interval: 2h
+    update_interval: 5min
 
 switch:
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
     name: Power Saving
+    entity_category: CONFIG
     pin:
       number: ${power_sawing_pin}
       inverted: True
   - platform: template
     optimistic: True
     name: Display Flip
+    entity_category: CONFIG
     id: display_flip
     restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
@@ -323,21 +351,29 @@ switch:
             id(tm1637_display).set_inverted(false);
         - component.update: tm1637_display
   - platform: template
-    name: Display Intensity Auto
-    id: auto_brightness_switch
-    optimistic: True
-    restore_mode: RESTORE_DEFAULT_ON
-    on_turn_on:
-      then:
-        - number.set:
-            id: display_intensity_number
-            value: !lambda return id(desired_display_intensity).state;
-  - platform: template
     id: ticking_switch
     name: Tick Sound
     optimistic: True
+    entity_category: CONFIG
     restore_mode: RESTORE_DEFAULT_OFF
-
+  - platform: template
+    id: online_on_battery
+    name: Battery Stay online
+    optimistic: True
+    entity_category: CONFIG
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: template
+    entity_category: CONFIG
+    name: 'WireGuard Enabled'
+    lambda: return id(wireguard_component).is_enabled();
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action: 
+      then:
+        - wireguard.enable:
+    turn_off_action: 
+      then:
+        - wireguard.disable:
+ 
 output:
   - platform: ledc
     id: rtttl_out
@@ -353,8 +389,8 @@ rtttl:
   id: my_rtttl
 
 i2c:
-  - sda: 8
-    scl: 9
+  - sda: $sda_pin
+    scl: $scl_pin
 
 script:
   - id: deep_sleep_start
@@ -395,7 +431,7 @@ script:
           uint64_t mask = (1 << $rotary_encoder_button_pin);
           if(id(ac_powered).state == false) {
             ESP_LOGI(TAG, "Battery powered, will wake up on power up");
-            mask |= (1 << $charging_pin) | (1 << $fully_charged_pin);
+            mask |= (1 << $charging_pin);
           }
 
           result = esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW);
@@ -477,214 +513,234 @@ script:
           id: menu_exit_request
           value: "false"
       - display_menu.hide:
-  - id: wifi_for_sync
-    mode: single
+  - id: sntp_updater_loop
     then:
       - while:
           condition:
             - lambda: return true;
           then:
-            - delay: 100ms
+            - lambda: |
+                if(kitchen_timer::sntp::is_time_to_force_sync())
+                  kitchen_timer::sntp::force_sync();
+            - wait_until:
+                condition:
+                  - lambda: return !kitchen_timer::sntp::force_sync_scheduled;
+                timeout: 10s
+            - lambda: |
+                kitchen_timer::sntp::force_sync_scheduled = false;
+                ::time(&kitchen_timer::sntp::sync_time);
+            - delay: 10ms            
+
+  - id: update_screen_loop
+    then:
+      - while:
+          condition:
+            - lambda: return true;
+          then:
             - if:
                 condition:
-                    - lambda: return id(sntp_time)->is_in_progress();
+                  - lambda: return clock_updater.can_update();
                 then:
-                  if:
-                    condition: 
-                      - not:
-                        - wifi.enabled:
-                    then:
-                      - logger.log: "Enabling wifi"
-                      - wifi.enable:
-                else:
+                  - logger.log:
+                      level: DEBUG
+                      format: Updating screen
+                  - script.execute: tick_sound
                   - lambda: |
-                      sntp_synched = true;
-                      
-                  - if:
+                      ++id(frame);
+                      clock_updater.mark_updated();
+                      // id(tm1637_display).display();
+                  - logger.log:
+                      level: DEBUG
+                      format: Frame is %d.
+                      args:
+                        - id(frame)
+                  - component.update: tm1637_display
+                  - wait_until:
                       condition:
-                        - binary_sensor.is_off: ac_powered
-                      then:
-                        - logger.log: "Disabling wifi"
-                        - wifi.disable:
-  - id: update_screen
-    then:
-      while:
-        condition:
-          - lambda: return true;
-        then:
-          - if:
-              condition:
-                - lambda: return clock_updater.can_update();
-              then:
-                - logger.log:
-                    level: DEBUG
-                    format: Updating screen
-                - script.execute: tick_sound
-                - lambda: |
-                    ++id(frame);
-                    clock_updater.mark_updated();
-                    // id(tm1637_display).display();
-                - logger.log:
-                    level: DEBUG
-                    format: Frame is %d.
-                    args:
-                      - id(frame)
-                - component.update: tm1637_display
-                - wait_until:
-                    condition:
-                      not:
-                        - script.is_running: tick_sound
-                - lambda: |
-                    ESP_LOGD(TAG, "Checking the song");
-                    const auto& song_index = id(signal_song_index);
-                    if(song_index < id(songs).size() && !id(my_rtttl).is_playing()) {
-                      ESP_LOGD(TAG, "Start song playing");
-                      id(my_rtttl).play(id(songs)[song_index]);
-                    }
-          - component.update: light_sensor
-          - delay: 1ms # to process other sensor loops
-          - if:
-              condition:
-                and:
-                  - binary_sensor.is_off: encoder_button
-                  - binary_sensor.is_off: charging_sensor
-                  - binary_sensor.is_off: fully_charged
-                  - not:
-                      - lambda: return id(sntp_time)->is_in_progress();
-                  - not:
-                      display_menu.is_active:
-                  - not:
-                      - wifi.enabled:
-                  - not:
-                      - script.is_running: play_signal
-              then:
-                - lambda: |
-                    ESP_LOGD(TAG, "Light sleep attempt");
-                    static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
-                      gpio_num_t($rotary_encoder_button_pin),
-                      gpio_num_t($charging_pin),
-                      gpio_num_t($fully_charged_pin) 
+                        not:
+                          - script.is_running: tick_sound
+                  - lambda: |
+                      ESP_LOGD(TAG, "Checking the song");
+                      const auto& song_index = id(signal_song_index);
+                      if(song_index < id(songs).size() && !id(my_rtttl).is_playing()) {
+                        ESP_LOGD(TAG, "Start song playing");
+                        id(my_rtttl).play(id(songs)[song_index]);
+                      }
+            - component.update: light_sensor
+            - delay: 1ms # to process other sensor loops
+            - if:
+                condition:
+                  and:
+                    - binary_sensor.is_off: encoder_button
+                    - binary_sensor.is_off: wifi_required
+                    - not:
+                        display_menu.is_active:
+                    - not:
+                        - script.is_running: play_signal
+                then:
+                  - lambda: |
+                      ESP_LOGD(TAG, "Light sleep attempt");
+                      static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
+                        gpio_num_t($rotary_encoder_button_pin),
+                        gpio_num_t($charging_pin),
+                        };
+
+                      static const auto encoder_pins = std::initializer_list<gpio_num_t>{ 
+                        // gpio_num_t($rotary_encoder_a_pin), 
+                        // gpio_num_t($rotary_encoder_b_pin), 
                       };
 
-                    static const auto encoder_pins = std::initializer_list<gpio_num_t>{ 
-                      // gpio_num_t($rotary_encoder_a_pin), 
-                      // gpio_num_t($rotary_encoder_b_pin), 
-                    };
+                      // InterruptLock lock;
 
-                    // InterruptLock lock;
-
-                    for(const auto& gpio: wake_pins) {
-                      if(0 == gpio_get_level(gpio)) {
-                        ESP_LOGD(TAG, "GPIO %d is low. Don't sleep", gpio);
-                        return;
-                      }
-                    }
-
-                    for(const auto& gpio: encoder_pins) {
-                      if(0 == gpio_get_level(gpio)) {
-                        ESP_LOGD(TAG, "Encoder GPIO %d is low. Don't sleep", gpio);
-                        return;
-                      }
-                    }
-
-                    const auto to_sleep = clock_updater.useconds_to_update();
-                    ESP_LOGD(TAG, "To sleep calculates as %dus", to_sleep);
-                    if(to_sleep < 15*1000) {
-                      ESP_LOGD(TAG, "To short to sleep");
-                      return;
-                    }
-
-                    ESP_LOGD(TAG, "Enabling timer wakeup");
-                    auto result = esp_sleep_enable_timer_wakeup(to_sleep);
-                    if(result != ESP_OK) {
-                      ESP_LOGE(TAG, "Can't setup wake timer for %dus, error: %d", to_sleep, result);
-                      return;
-                    }
-
-                    ESP_LOGD(TAG, "Enabling GPIO wakeup");
-                    for(const auto& gpio: wake_pins) {
-                      result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
-                      if(ESP_OK != result) {
-                        ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
-                      }
-                    }
-
-                    for(const auto& gpio: encoder_pins) {
-                      result = gpio_intr_disable(gpio);
-                      if(ESP_OK != result) {
-                        ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
-                      }
-                      result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
-                      if(ESP_OK != result) {
-                        ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
-                      }
-                    }
-
-                    result = esp_sleep_enable_gpio_wakeup();
-                    if(ESP_OK != result) {
-                      ESP_LOGE(TAG, "Can't enable gpio wakeup, error %d", result);
-                    }
-                    // App.run_safe_shutdown_hooks();
-                    // adc_power_off();
-                    // id(tm1637_display).stop_poller();
-                    // ESP_LOGD(TAG, "Starting light sleep");
-                    esp_task_wdt_delete(nullptr);
-                    result = esp_light_sleep_start();
-                    esp_task_wdt_init(1500, false);
-
-                    for(const auto& gpio: wake_pins) {
-                      const auto result = gpio_wakeup_disable(gpio);
-                      if(ESP_OK != result) {
-                        ESP_LOGE(TAG, "Can't disable gpio wake source %d, error: %d", gpio, result);
-                      }
-                    }
-
-                    ESP_LOGD(TAG, "Enabling GPIO interrupts");
-                    for(const auto& gpio: encoder_pins) {
-                      const auto result = gpio_intr_enable(gpio);
-                      if(ESP_OK != result) {
-                        ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
-                      }
-                    }
-
-                    switch(result) {
-                      case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
-                        ESP_LOGE(TAG, "Can't start sleep: duration to short");
-                        break;
-                      case ESP_ERR_SLEEP_REJECT:
-                        ESP_LOGE(TAG, "Can't start sleep: sleep reject");
-                        break;
-                      case ESP_OK:
-                        ESP_LOGD(TAG, "Woke up");
-                        switch(esp_sleep_get_wakeup_cause()) {
-                          case ESP_SLEEP_WAKEUP_GPIO:
-                            ESP_LOGI(TAG, "Wake cause is GPIO");
-                            id(encoder_button)->loop();
-                            ESP_LOGI(TAG, "encoder_button: %d", int(id(encoder_button).state));
-                            id(charging_sensor)->loop();
-                            ESP_LOGI(TAG, "charging_sensor: %d", int(id(charging_sensor).state));
-                            id(fully_charged)->loop();
-                            ESP_LOGI(TAG, "fully_charged: %d", int(id(fully_charged).state));
-                            id(ac_powered)->loop();
-                            ESP_LOGI(TAG, "ac_powered: %d", int(id(ac_powered).state));
-                            break;
-                          case ESP_SLEEP_WAKEUP_TIMER:
-                            ESP_LOGD(TAG, "Wake cause is a Timer");
-                            break;
-                          default:
-                            ESP_LOGW(TAG, "Unexpected wake cause %d", esp_sleep_get_wakeup_cause());
-                            break;
+                      for(const auto& gpio: wake_pins) {
+                        if(0 == gpio_get_level(gpio)) {
+                          ESP_LOGD(TAG, "GPIO %d is low. Don't sleep", gpio);
+                          return;
                         }
-                        break;
-                      default:
-                        ESP_LOGE(TAG, "Can't start sleep: error %d", result);
-                        break;
-                    }
-                    // id(tm1637_display).start_poller();
-              else:
-                - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
+                      }
+
+                      for(const auto& gpio: encoder_pins) {
+                        if(0 == gpio_get_level(gpio)) {
+                          ESP_LOGD(TAG, "Encoder GPIO %d is low. Don't sleep", gpio);
+                          return;
+                        }
+                      }
+
+                      const auto to_sleep = clock_updater.useconds_to_update();
+                      ESP_LOGD(TAG, "To sleep calculates as %dus", to_sleep);
+                      if(to_sleep < 15*1000) {
+                        ESP_LOGD(TAG, "To short to sleep");
+                        return;
+                      }
+
+                      ESP_LOGD(TAG, "Enabling timer wakeup");
+                      auto result = esp_sleep_enable_timer_wakeup(to_sleep);
+                      if(result != ESP_OK) {
+                        ESP_LOGE(TAG, "Can't setup wake timer for %dus, error: %d", to_sleep, result);
+                        return;
+                      }
+
+                      ESP_LOGD(TAG, "Enabling GPIO wakeup");
+                      for(const auto& gpio: wake_pins) {
+                        result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
+                        }
+                      }
+
+                      for(const auto& gpio: encoder_pins) {
+                        result = gpio_intr_disable(gpio);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
+                        }
+                        result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
+                        }
+                      }
+
+                      result = esp_sleep_enable_gpio_wakeup();
+                      if(ESP_OK != result) {
+                        ESP_LOGE(TAG, "Can't enable gpio wakeup, error %d", result);
+                      }
+                      // App.run_safe_shutdown_hooks();
+                      // adc_power_off();
+                      // id(tm1637_display).stop_poller();
+                      // ESP_LOGD(TAG, "Starting light sleep");
+                      esp_task_wdt_delete(nullptr);
+                      result = esp_light_sleep_start();
+                      esp_task_wdt_init(1500, false);
+
+                      for(const auto& gpio: wake_pins) {
+                        const auto result = gpio_wakeup_disable(gpio);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't disable gpio wake source %d, error: %d", gpio, result);
+                        }
+                      }
+
+                      ESP_LOGD(TAG, "Enabling GPIO interrupts");
+                      for(const auto& gpio: encoder_pins) {
+                        const auto result = gpio_intr_enable(gpio);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
+                        }
+                      }
+
+                      switch(result) {
+                        case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
+                          ESP_LOGE(TAG, "Can't start sleep: duration to short");
+                          break;
+                        case ESP_ERR_SLEEP_REJECT:
+                          ESP_LOGE(TAG, "Can't start sleep: sleep reject");
+                          break;
+                        case ESP_OK:
+                          ESP_LOGD(TAG, "Woke up");
+                          switch(esp_sleep_get_wakeup_cause()) {
+                            case ESP_SLEEP_WAKEUP_GPIO:
+                              ESP_LOGI(TAG, "Wake cause is GPIO");
+                              id(encoder_button)->loop();
+                              ESP_LOGI(TAG, "encoder_button: %d", int(id(encoder_button).state));
+                              id(charging_sensor)->loop();
+                              ESP_LOGI(TAG, "charging_sensor: %d", int(id(charging_sensor).state));
+                              id(fully_charged)->loop();
+                              ESP_LOGI(TAG, "fully_charged: %d", int(id(fully_charged).state));
+                              id(ac_powered)->loop();
+                              ESP_LOGI(TAG, "ac_powered: %d", int(id(ac_powered).state));
+                              break;
+                            case ESP_SLEEP_WAKEUP_TIMER:
+                              ESP_LOGD(TAG, "Wake cause is a Timer");
+                              break;
+                            default:
+                              ESP_LOGW(TAG, "Unexpected wake cause %d", esp_sleep_get_wakeup_cause());
+                              break;
+                          }
+                          break;
+                        default:
+                          ESP_LOGE(TAG, "Can't start sleep: error %d", result);
+                          break;
+                      }
+                      // id(tm1637_display).start_poller();
+                else:
+                  - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
 
 sensor:
+  - platform: template
+    id: sntp_correction_interval
+    entity_category: diagnostic
+    name: SNTP Interval
+    accuracy_decimals: 2
+    unit_of_measurement: s
+    state_class: measurement
+    device_class: duration
+    lambda: |
+      return kitchen_timer::sntp::has_prev_sync 
+        ? float(kitchen_timer::sntp::interval_us)*1e-6f 
+        : NAN;
+  - platform: template
+    id: sntp_correction_value
+    entity_category: diagnostic
+    name: SNTP Correction
+    accuracy_decimals: 3
+    state_class: measurement
+    device_class: duration
+    unit_of_measurement: ms
+    lambda: |
+      return kitchen_timer::sntp::interval_us == 0 
+        ? NAN 
+        : float(kitchen_timer::sntp::correction_us)/1000.f;
+  - platform: template
+    id: sntp_correction_rate
+    entity_category: diagnostic
+    name: SNTP Error per year
+    accuracy_decimals: 2
+    unit_of_measurement: s
+    state_class: measurement
+    device_class: duration
+    lambda: |
+      return kitchen_timer::sntp::interval_us == 0 
+        ? NAN 
+        : float(kitchen_timer::sntp::correction_us*365*24*60*60) /
+          float(kitchen_timer::sntp::interval_us);
   - platform: debug
     free:
       name: "Heap Free"
@@ -694,8 +750,6 @@ sensor:
       name: "Heap Max Block"
     loop_time:
       name: "Loop Time"
-    # psram:
-    #   name: "Free PSRAM"
   - platform: rotary_encoder
     id: encoder
     name: Encoder Position
@@ -703,9 +757,15 @@ sensor:
     pin_a:
       inverted: True
       number: ${rotary_encoder_a_pin}
+      mode: 
+        input: True
+        pullup: True
     pin_b:
       inverted: True
       number: ${rotary_encoder_b_pin}
+      mode: 
+        input: True
+        pullup: True
     on_anticlockwise:
       - if: 
           condition:
@@ -752,15 +812,18 @@ sensor:
 
     infrared:
       name: Light Infrared
+      entity_category: diagnostic
       filters:
         - throttle: 5s
     full_spectrum:
       name: Light Full spectrum
+      entity_category: diagnostic
       filters:
         - throttle: 5s
 
   - platform: copy
     name: Light Ambient
+    entity_category: diagnostic
     source_id: ambient_light_sensor_fast
     filters:
       - throttle: 5s
@@ -784,12 +847,13 @@ sensor:
           max_value: 7
           min_value: 0
       - delta: 0.1% # to prevent publishing non-changed values
-
     on_value:
       then:
         - if:
             condition:
-              - switch.is_on: auto_brightness_switch
+              - number.in_range: 
+                  id: display_intensity
+                  below: -0.5
             then:
               - number.set:
                   id: display_intensity_number
@@ -868,29 +932,32 @@ sensor:
             - 4.2 -> 100.
 
   - platform: adc
-    name: Power Charging Current
+    name: Battery Charging Current
     pin: 
       number: ${charging_current_pin}
       mode:
         input: true
     device_class: current
+    entity_category: DIAGNOSTIC
     id: charging_current_fast
     attenuation: auto
     unit_of_measurement: mA
     update_interval: 5s
     filters:
       - lambda: |
-          // if(id(charging_sensor).state)
-            return x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/;
-          // return 0.0;
+            return id(charging_sensor).state ? x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/ : NAN;
 
 binary_sensor:
   - platform: gpio
     id: encoder_button
     name: Encoder Button
+    internal: True
     pin:
       number: ${rotary_encoder_button_pin}
       inverted: True
+      mode: 
+        input: True
+        pullup: True
     on_click:
       if: 
         condition:
@@ -922,6 +989,7 @@ binary_sensor:
   - platform: gpio
     name: Power Charging
     id: charging_sensor
+    entity_category: DIAGNOSTIC
     pin:
       number: ${charging_pin}
       inverted: True
@@ -931,6 +999,7 @@ binary_sensor:
   - platform: gpio
     name: Power Fully Charged
     id: fully_charged
+    entity_category: DIAGNOSTIC
     pin:
       number: ${fully_charged_pin}
       inverted: True
@@ -940,34 +1009,79 @@ binary_sensor:
   - platform: template
     name: Power AC
     id: ac_powered
+    entity_category: DIAGNOSTIC
     lambda: |
       return id(fully_charged).state || id(charging_sensor).state;
-    on_press:
-      wifi.enable:
+    on_press: 
+      lambda: |
+        esp_pm_config_esp32c3_t config;
+        auto result = esp_pm_get_configuration(&config);
+        if(ESP_OK != result) {
+          ESP_LOGE(TAG, "Can't get pm config, error %d", result);
+          return;
+        }
+        config.max_freq_mhz = 160;
+        config.min_freq_mhz = 160;
+        config.light_sleep_enable = false;
+        result = esp_pm_configure(&config);
+        if(ESP_OK != result) {
+          ESP_LOGE(TAG, "Can't set pm config, error %d", result);
+          return;
+        }
+    on_release: 
+      lambda: |
+        esp_pm_config_esp32c3_t config;
+        auto result = esp_pm_get_configuration(&config);
+        if(ESP_OK != result) {
+          ESP_LOGE(TAG, "Can't get pm config, error %d", result);
+          return;
+        }
+        config.max_freq_mhz = 80;
+        config.min_freq_mhz = 80;
+        config.light_sleep_enable = false;
+        result = esp_pm_configure(&config);
+        if(ESP_OK != result) {
+          ESP_LOGE(TAG, "Can't set pm config, error %d", result);
+          return;
+        } 
+        
+        
+  - platform: wireguard
+    status:
+      entity_category: DIAGNOSTIC
+      name: 'WireGuard Status'
+  - platform: template
+    id: wifi_required
+    lambda: |
+      return id(online_on_battery).state || id(ac_powered).state || kitchen_timer::sntp::force_sync_scheduled;
+    on_press: 
+      then:
+        - wifi.enable: 
+    on_release: 
+      then:
+        - wifi.disable:
+          
 
-# text:
-#   - platform: template
-#     name: Sound Add
-#     id: rtttl_text
-#     optimistic: true
-#     mode: text
-#     restore_value: True
-#     initial_value: "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e"
+text_sensor:
+  - platform: wireguard
+    address:
+      entity_category: DIAGNOSTIC
+      name: 'WireGuard Address'
 
 button:
   - platform: restart
     name: Restart device
     entity_category: config
   - platform: template
-    name: Sleep for 5 seconds
+    name: Deep sleep
+    entity_category: config
     on_press:
       then:
-        - deep_sleep.enter:
-            id: deep_sleep_component
-            sleep_duration: 5s
+        - script.execute: deep_sleep_start
 number:
   - platform: template
     name: Display Intensity
+    entity_category: CONFIG
     id: display_intensity
     max_value: 7
     min_value: -1
@@ -975,20 +1089,12 @@ number:
     update_interval: 1s
     optimistic: True
     restore_value: True
-    on_value:
+    set_action:
       then:
-        - if:
-            condition:
-              - number.in_range:
-                  id: display_intensity
-                  below: -0.5
-            then:
-              - switch.turn_on: auto_brightness_switch
-            else:
-              - switch.turn_off: auto_brightness_switch
-              - number.set:
-                  id: display_intensity_number
-                  value: !lambda "return x;"
+        - number.set: 
+            id: display_intensity_number
+            value: !lambda |
+              return x < 0 ? id(desired_display_intensity).state : x;
   - platform: template
     name: Raw Display Intensity
     id: display_intensity_number
@@ -997,7 +1103,9 @@ number:
     step: 1
     update_interval: 1s
     optimistic: True
-    on_value:
+    entity_category: CONFIG
+    internal: true
+    set_action:
       then:
         - lambda: |
             id(tm1637_display).set_on(int(x) != -1);
@@ -1005,14 +1113,17 @@ number:
             id(tm1637_display).update();
   - platform: template
     name: Sound Gain
-    max_value: 100
-    min_value: -100
-    step: 1
+    max_value: 1.0
+    min_value: 0.1
+    step: 0.01
+    entity_category: CONFIG
     optimistic: True
+    restore_value: True
+    initial_value: 0.6
     on_value:
       then:
         - lambda: |
-            id(my_rtttl).set_gain(0.01*x);
+            id(my_rtttl).set_gain(x);
 
 lcd_menu_7segment:
   id: menu
@@ -1143,7 +1254,7 @@ lcd_menu_7segment:
           text: $menu_text_back
     - type: number
       id: brightness_menu_item
-      text: "ЯРКОСТЬ"
+      text: "ЯРКО"
       immediate_edit: false
       value_lambda: |
         std::string result = "Auto";
@@ -1158,7 +1269,7 @@ lcd_menu_7segment:
       number: display_intensity
     - type: switch
       id: turn_menu_item
-      text: "ПОВОРОТ"
+      text: "ПОВО"
       immediate_edit: false
       on_text: "12.34"
       off_text: "12.34"
@@ -1169,6 +1280,11 @@ lcd_menu_7segment:
       on_text: "On"
       off_text: "OFF"
       switch: ticking_switch
+    - type: switch
+      switch: online_on_battery
+      text: "СЕРВ"
+      on_text: "ВСЕГ"
+      off_text: "СЕТЬ"
     - type: command
       text: $menu_text_back
       on_value:
@@ -1188,6 +1304,7 @@ display:
   lambda: |-
     ESP_LOGD(TAG, "Displaying");
     if(!id(signal_message).empty()) {
+      it.set_on(true);
       ESP_LOGD(TAG, "Figuring out the message");
       const auto& message = id(signal_message)[id(frame) % id(signal_message).size()];
       ESP_LOGD(TAG, "Showing message %s", message.c_str());
@@ -1196,31 +1313,30 @@ display:
     }
 
     if (id(menu).is_active()) {
+      it.set_on(true);
       ESP_LOGD(TAG, "Drawing menu");
       id(menu).draw();
       return;
     }
 
-    ESP_LOGD(TAG, "Looking for closest timer");
-    optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
+    // ESP_LOGD(TAG, "Looking for closest timer");
+    // optional<uint32_t> smallest_timer = closest_timer_il({${timer_list}});
 
-    if(smallest_timer) {
-      ESP_LOGD(TAG, "Showing timer %d", *smallest_timer);
-      it.printf("%s", timer_value_string(*smallest_timer).c_str());
-      return;
-    }
+    // if(smallest_timer) {
+    //   ESP_LOGD(TAG, "Showing timer %d", *smallest_timer);
+    //   it.printf("%s", timer_value_string(*smallest_timer).c_str());
+    //   return;
+    // }
 
     if(id(frame ) % 2) {
       ESP_LOGD(TAG, "Checking system messages");
       auto && wifi = id(wifi_component);
       if(!wifi->is_disabled() && !wifi->is_connected()) {
-        ESP_LOGD(TAG, "Printing WIFI");
         it.print("WIFI");
         return;
       }
 
-      if (id(sntp_time)->is_in_progress()) {
-        ESP_LOGD(TAG, "Printing SMTP");
+      if (kitchen_timer::sntp::force_sync_scheduled) {
         it.print("sntp");
         return;
       }
@@ -1228,5 +1344,7 @@ display:
 
     ESP_LOGD(TAG, "Showing current time");
     const auto now = id(sntp_time).now();
-
-    it.strftime((id(frame) % 2) == 0 ? "%H.%M": "%H%M", now);
+    if(now.is_valid())
+      it.strftime((id(frame) % 2) == 0 ? "%H.%M": "%H%M", now);
+    else
+      it.print("----");

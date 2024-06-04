@@ -4,6 +4,7 @@
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_task_wdt.h"
+#include "esp_pm.h"
 
 #include <cstdint>
 #include <iterator>
@@ -11,9 +12,68 @@
 #include <string>
 #include <vector>
 
-bool RTC_DATA_ATTR sntp_synched = false;
-
 static const char *const TAG = "kitchen-timer";
+
+namespace kitchen_timer {
+namespace sntp {
+int64_t RTC_DATA_ATTR correction_us = 0;
+int64_t RTC_DATA_ATTR interval_us = 0;
+time_t RTC_DATA_ATTR sync_time = 0;
+bool force_sync_scheduled = false;
+struct timeval RTC_DATA_ATTR prev_sync;
+bool RTC_DATA_ATTR has_prev_sync = false;
+
+bool is_time_to_force_sync() {
+  time_t now;
+  ::time(&now);
+  return sync_time == 0 ? false : now > sync_time + sntp_time->get_update_interval()/1000 + 10;
+}
+
+void force_sync() {
+  if (force_sync_scheduled)
+    return;
+
+  // if ( !sntp_restart() ) {
+  //   ESP_LOGW(TAG, "Cant' schedule restart. Sntp is not running.");
+  // } else {
+    ESP_LOGD(TAG, "Sntp force sync scheduled.");
+    force_sync_scheduled = true;
+  // }
+}
+
+void sntp_sync_time(struct timeval *tv) {
+  force_sync_scheduled = false;
+
+  if (has_prev_sync) {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    correction_us =
+        (static_cast<int64_t>(tv->tv_sec) - static_cast<int64_t>(now.tv_sec)) *
+            1000000 +
+        static_cast<int64_t>(tv->tv_usec) - static_cast<int64_t>(now.tv_usec);
+
+    interval_us = (static_cast<int64_t>(tv->tv_sec) -
+                   static_cast<int64_t>(prev_sync.tv_sec)) *
+                      1000000 +
+                  static_cast<int64_t>(tv->tv_usec) -
+                  static_cast<int64_t>(prev_sync.tv_usec);
+  }
+
+  has_prev_sync = true;
+  prev_sync = *tv;
+  ::time(&sync_time);
+  settimeofday(tv, NULL);
+  sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
+}
+
+} // namespace sntp
+} // namespace kitchen_timer
+
+
+// Replace weak linked default one
+extern "C" void sntp_sync_time(struct timeval *tv) {
+  ::kitchen_timer::sntp::sntp_sync_time(tv);
+}
 
 namespace alarms {
 namespace schedule {
@@ -36,14 +96,14 @@ bool is_firing() {
 void push(uint8_t song_index, std::vector<std::string> message) {
   schedule::queue.push(
       schedule::Item{.message = std::move(message), .song_index = song_index});
-  if(!play_signal->is_running()) {
+  if (!play_signal->is_running()) {
     play_signal->execute();
   }
 }
 
 optional<schedule::Item> pop() {
   optional<schedule::Item> result;
-  if(!schedule::queue.empty()) {
+  if (!schedule::queue.empty()) {
     result = std::move(schedule::queue.front());
     schedule::queue.pop();
   }
@@ -52,12 +112,12 @@ optional<schedule::Item> pop() {
 
 } // namespace alarms
 
-const std::string& song_by_index(const size_t& index) {
+const std::string &song_by_index(const size_t &index) {
   static const std::string empty;
   return index < songs->value().size() ? songs->value()[index] : empty;
 }
 
-const std::string& song_by_index(const optional<size_t>& index) {
+const std::string &song_by_index(const optional<size_t> &index) {
   return index ? song_by_index(*index) : song_by_index(static_cast<size_t>(-1));
 }
 
