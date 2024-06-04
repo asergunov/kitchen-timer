@@ -2,9 +2,9 @@
 
 #include "esp_attr.h"
 #include "esp_netif.h"
+#include "esp_pm.h"
 #include "esp_sntp.h"
 #include "esp_task_wdt.h"
-#include "esp_pm.h"
 
 #include <cstdint>
 #include <iterator>
@@ -22,11 +22,14 @@ time_t RTC_DATA_ATTR sync_time = 0;
 bool force_sync_scheduled = false;
 struct timeval RTC_DATA_ATTR prev_sync;
 bool RTC_DATA_ATTR has_prev_sync = false;
+int call_counter = 0;
 
 bool is_time_to_force_sync() {
   time_t now;
   ::time(&now);
-  return sync_time == 0 ? false : now > sync_time + sntp_time->get_update_interval()/1000 + 10;
+  return sync_time == 0
+             ? false
+             : now > sync_time + sntp_time->get_update_interval() / 1000 + 10;
 }
 
 void force_sync() {
@@ -36,15 +39,17 @@ void force_sync() {
   // if ( !sntp_restart() ) {
   //   ESP_LOGW(TAG, "Cant' schedule restart. Sntp is not running.");
   // } else {
-    ESP_LOGD(TAG, "Sntp force sync scheduled.");
-    force_sync_scheduled = true;
+  ESP_LOGD(TAG, "Sntp force sync scheduled.");
+  force_sync_scheduled = true;
   // }
 }
 
 void sntp_sync_time(struct timeval *tv) {
+  call_counter++;
   force_sync_scheduled = false;
 
-  if (has_prev_sync) {
+  if (has_prev_sync &&
+      (prev_sync.tv_sec != tv->tv_sec || prev_sync.tv_usec != tv->tv_usec)) {
     struct timeval now;
     gettimeofday(&now, NULL);
     correction_us =
@@ -68,7 +73,6 @@ void sntp_sync_time(struct timeval *tv) {
 
 } // namespace sntp
 } // namespace kitchen_timer
-
 
 // Replace weak linked default one
 extern "C" void sntp_sync_time(struct timeval *tv) {

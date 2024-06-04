@@ -13,8 +13,8 @@ esp32:
       # CONFIG_PM_USE_RTC_TIMER_REF: y
       # CONFIG_PM_DFS_INIT_AUTO: y
       # CONFIG_ESP_INT_WDT: n
-      CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
-      CONFIG_SNTP_TIME_SYNC_METHOD_CUSTOM: y
+      # TODO: enable me BACK! CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
+      # TODO: maybe needed CONFIG_SNTP_TIME_SYNC_METHOD_CUSTOM: y
 
 # Enable logging
 logger:
@@ -326,6 +326,17 @@ time:
     update_interval: 5min
 
 switch:
+  - platform: template
+    name: SNTP Immediate Update
+    entity_category: CONFIG
+    lambda: |
+      return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
+    turn_on_action: 
+      then:
+        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+    turn_off_action: 
+      then:
+        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
@@ -705,6 +716,14 @@ script:
 
 sensor:
   - platform: template
+    name: SNTP Call count
+    id: sntp_call_count
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    state_class: total_increasing
+    lambda: |
+      return kitchen_timer::sntp::call_counter;
+  - platform: template
     id: sntp_correction_interval
     entity_category: diagnostic
     name: SNTP Interval
@@ -1067,6 +1086,24 @@ text_sensor:
     address:
       entity_category: DIAGNOSTIC
       name: 'WireGuard Address'
+  - platform: template
+    name: SNTP Status
+    update_interval: 15s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      switch(sntp_get_sync_status()) {
+        case SNTP_SYNC_STATUS_COMPLETED:
+          id(sntp_call_count).update();
+          id(sntp_correction_interval).update();
+          id(sntp_correction_value).update();
+          id(sntp_correction_rate).update();
+          return std::string("Completed");
+        case SNTP_SYNC_STATUS_RESET:
+          return std::string("Reset");
+        case SNTP_SYNC_STATUS_IN_PROGRESS:
+          return std::string("In Progress");
+      }
+      return std::string();
 
 button:
   - platform: restart
@@ -1078,6 +1115,13 @@ button:
     on_press:
       then:
         - script.execute: deep_sleep_start
+  - platform: template
+    entity_category: config
+    name: SNTP Sync
+    on_press: 
+      then:
+        - lambda: 
+            sntp_restart();
 number:
   - platform: template
     name: Display Intensity
@@ -1304,7 +1348,7 @@ display:
   lambda: |-
     ESP_LOGD(TAG, "Displaying");
     if(!id(signal_message).empty()) {
-      it.set_on(true);
+      // it.set_on(true);
       ESP_LOGD(TAG, "Figuring out the message");
       const auto& message = id(signal_message)[id(frame) % id(signal_message).size()];
       ESP_LOGD(TAG, "Showing message %s", message.c_str());
@@ -1313,7 +1357,7 @@ display:
     }
 
     if (id(menu).is_active()) {
-      it.set_on(true);
+      // it.set_on(true);
       ESP_LOGD(TAG, "Drawing menu");
       id(menu).draw();
       return;
