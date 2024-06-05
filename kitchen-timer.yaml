@@ -94,6 +94,9 @@ esphome:
     priority: 1000
     then:
       - deep_sleep.prevent: deep_sleep_component
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda return 0.0f;
       - lambda: |
           esp_task_wdt_init(1500, false);
           setenv("TZ", "${timezone}", 1);
@@ -109,11 +112,14 @@ esphome:
           }
       # - lambda: |
       #     App.set_loop_interval(100);
-      - script.execute: update_screen_loop
+      - script.execute: update_display_loop
       - script.execute: sntp_updater_loop
       - script.execute: play_battery_animation
 
 globals:
+  - id: ota_progress
+    type: float
+    initial_value: "NAN"
   # - id: playing_battery_animation_frame
   #   type: uint8_t
   #   initial_value: "0"
@@ -213,6 +219,12 @@ ota:
   on_error:
     then:
       - switch.turn_on: power_saving
+  on_progress: 
+    then:
+      - globals.set: 
+          id: ota_progress
+          value: !lambda return x;
+      - component.update: tm1637_display          
 
 packages:
   signal1: !include
@@ -560,7 +572,7 @@ script:
                 ::time(&kitchen_timer::sntp::sync_time);
             - delay: 10ms
 
-  - id: update_screen_loop
+  - id: update_display_loop
     then:
       - while:
           condition:
@@ -583,6 +595,9 @@ script:
                       format: Frame is %d.
                       args:
                         - id(frame)
+                  - component.update: light_sensor
+                  - component.update: display_intensity
+                  - component.update: display_intensity_number
                   - component.update: tm1637_display
                   - wait_until:
                       condition:
@@ -595,7 +610,6 @@ script:
                         ESP_LOGD(TAG, "Start song playing");
                         id(my_rtttl).play(id(songs)[song_index]);
                       }
-            - component.update: light_sensor
             - delay: 1ms # to process other sensor loops
             - if:
                 condition:
@@ -606,6 +620,8 @@ script:
                         display_menu.is_active:
                     - not:
                         - script.is_running: play_signal
+                    - not:
+                        - script.is_running: play_battery_animation
                 then:
                   - lambda: |
                       ESP_LOGD(TAG, "Light sleep attempt");
@@ -733,29 +749,58 @@ script:
                   - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
   - id: play_battery_animation
     then:
-      - number.set: 
-          id: display_intensity_number
-          value: !lambda return 1.f;
       - component.update: light_sensor
       - component.update: battery_voltage_unfiltered
       - component.update: tm1637_display
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda return 1.f;
       - delay: 20ms
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda |
+            const auto& x = id(display_intensity).state;
+            const auto& out = x < 0 ? id(desired_display_intensity).state : x;
+            return std::min(out, 1.0f);
       - component.update: light_sensor
       - component.update: battery_voltage_unfiltered
       - component.update: tm1637_display
       - delay: 40ms
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda |
+            const auto& x = id(display_intensity).state;
+            const auto& out = x < 0 ? id(desired_display_intensity).state : x;
+            return std::min(out, 2.0f);
       - component.update: light_sensor
       - component.update: battery_voltage_unfiltered
       - component.update: tm1637_display
       - delay: 80ms
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda |
+            const auto& x = id(display_intensity).state;
+            const auto& out = x < 0 ? id(desired_display_intensity).state : x;
+            return std::min(out, 4.0f);
       - component.update: light_sensor
       - component.update: battery_voltage_unfiltered
       - component.update: tm1637_display
       - delay: 160ms
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda |
+            const auto& x = id(display_intensity).state;
+            const auto& out = x < 0 ? id(desired_display_intensity).state : x;
+            return std::min(out, 6.0f);
       - component.update: light_sensor
       - component.update: battery_voltage_unfiltered
       - component.update: tm1637_display
       - delay: 320ms
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda |
+            const auto& x = id(display_intensity).state;
+            return x < 0 ? id(desired_display_intensity).state : x;
       # - globals.set: 
       #     id: playing_battery_animation_frame
       #     value: !lambda return 1;
@@ -1100,7 +1145,8 @@ sensor:
           max_value: 100
           min_value: 0
       - lambda: |
-          kitchen_timer::last_battery_percentage = x;
+          if(!isnan(x))
+            kitchen_timer::last_battery_percentage = x;
           return x;
 
   - platform: adc
@@ -1505,6 +1551,11 @@ display:
   update_interval: never
   intensity: 7
   lambda: |-
+    if(!isnan(id(ota_progress))) {
+      it.printf("U%3.0f", id(ota_progress));
+      return;
+    }
+
     if(id(play_battery_animation).is_running() || id(deep_sleep_start).is_running()) {
       if(isnan(kitchen_timer::last_battery_percentage)) {
         it.printf("БАТА");
