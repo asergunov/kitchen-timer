@@ -546,7 +546,7 @@ script:
           then:
             - lambda: |
                 if(kitchen_timer::sntp::is_time_to_force_sync())
-                  kitchen_timer::sntp::force_sync();
+                  kitchen_timer::sntp::force_sync_scheduled = true;
             - wait_until:
                 condition:
                   - lambda: return !kitchen_timer::sntp::force_sync_scheduled;
@@ -554,7 +554,7 @@ script:
             - lambda: |
                 kitchen_timer::sntp::force_sync_scheduled = false;
                 ::time(&kitchen_timer::sntp::sync_time);
-            - delay: 10ms            
+            - delay: 10ms
 
   - id: update_screen_loop
     then:
@@ -809,50 +809,49 @@ script:
 
 sensor:
   - platform: template
-    name: SNTP Call count
-    id: sntp_call_count
+    id: sntp_correction_abs_total
+    name: SNTP Absolute Correction Total
     entity_category: diagnostic
-    accuracy_decimals: 0
+    accuracy_decimals: 3
+    unit_of_measurement: ms
     state_class: total_increasing
     lambda: |
-      return kitchen_timer::sntp::call_counter;
+      return float(kitchen_timer::sntp::correction_us_abs_total)/1000.0f;
   - platform: template
-    id: sntp_correction_interval
+    id: sntp_correction_total
+    name: SNTP Correction Total
     entity_category: diagnostic
-    name: SNTP Interval
-    accuracy_decimals: 2
-    unit_of_measurement: s
-    state_class: measurement
-    device_class: duration
-    lambda: |
-      return kitchen_timer::sntp::has_prev_sync 
-        ? float(kitchen_timer::sntp::interval_us)*1e-6f 
-        : NAN;
-  - platform: template
-    id: sntp_correction_value
-    entity_category: diagnostic
-    name: SNTP Correction
     accuracy_decimals: 3
-    state_class: measurement
-    device_class: duration
     unit_of_measurement: ms
+    state_class: total
     lambda: |
-      return kitchen_timer::sntp::interval_us == 0 
-        ? NAN 
-        : float(kitchen_timer::sntp::correction_us)/1000.f;
+      return float(kitchen_timer::sntp::correction_us_total)/1000.0f;
   - platform: template
-    id: sntp_correction_rate
+    id: sntp_uptime
     entity_category: diagnostic
-    name: SNTP Error per year
-    accuracy_decimals: 2
+    name: SNTP Uptime
+    accuracy_decimals: 0
     unit_of_measurement: s
-    state_class: measurement
     device_class: duration
+    state_class: total_increasing
     lambda: |
-      return kitchen_timer::sntp::interval_us == 0 
-        ? NAN 
-        : float(kitchen_timer::sntp::correction_us*365*24*60*60) /
-          float(kitchen_timer::sntp::interval_us);
+      return kitchen_timer::sntp::first_sync_time == 0 
+        ? NAN
+        : float(kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time);
+  - platform: template
+    id: sntp_avg_correction
+    entity_category: diagnostic
+    name: SNTP Average Correction
+    accuracy_decimals: 2
+    unit_of_measurement: s/year
+    state_class: measurement
+    lambda: |
+      if(kitchen_timer::sntp::first_sync_time == 0)
+        return NAN;
+      const auto uptime = kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time;
+      if(uptime == 0)
+        return NAN;
+      return float(kitchen_timer::sntp::correction_us_total) / 1000.f / float(uptime) * 60.f * 60.f * 24.f * 365.f;
   - platform: debug
     free:
       name: "Heap Free"
@@ -1193,10 +1192,10 @@ text_sensor:
     lambda: |
       switch(sntp_get_sync_status()) {
         case SNTP_SYNC_STATUS_COMPLETED:
-          id(sntp_call_count).update();
-          id(sntp_correction_interval).update();
-          id(sntp_correction_value).update();
-          id(sntp_correction_rate).update();
+          id(sntp_correction_abs_total).update();
+          id(sntp_correction_total).update();
+          id(sntp_uptime).update();
+          id(sntp_avg_correction).update();
           return std::string("Completed");
         case SNTP_SYNC_STATUS_RESET:
           return std::string("Reset");
@@ -1491,29 +1490,45 @@ display:
     // }
 
     if(id(frame ) % 2) {
-      ESP_LOGD(TAG, "Checking system messages");
+      if(!isnan(kitchen_timer::last_battery_percentage)) {
+        if(id(charging_sensor).state 
+          ? kitchen_timer::last_battery_percentage > 99.f || 
+              (kitchen_timer::last_battery_percentage > 80.f && 0 == id(frame)/2 % 2) ||
+              (kitchen_timer::last_battery_percentage < 50.f && 0 == id(frame)/2 % 4) ||
+              (kitchen_timer::last_battery_percentage < 30.f && 0 == id(frame)/2 % 8) ||
+              (kitchen_timer::last_battery_percentage < 20.f && 0 == id(frame)/2 % 16) ||
+              (kitchen_timer::last_battery_percentage < 10.f && 0 == id(frame)/2 % 32) ||
+              (kitchen_timer::last_battery_percentage <  5.f && 0 == id(frame)/2 % 64)
+          : kitchen_timer::last_battery_percentage < 3.f || 
+              (kitchen_timer::last_battery_percentage <  5.f && 0 == id(frame)/2 % 2) ||
+              (kitchen_timer::last_battery_percentage < 10.f && 0 == id(frame)/2 % 4) ||
+              (kitchen_timer::last_battery_percentage < 20.f && 0 == id(frame)/2 % 8) ||
+              (kitchen_timer::last_battery_percentage < 30.f && 0 == id(frame)/2 % 16) ||
+              (kitchen_timer::last_battery_percentage < 50.f && 0 == id(frame)/2 % 32) ||
+              (kitchen_timer::last_battery_percentage < 80.f && 0 == id(frame)/2 % 64))
+          
+        {
+            it.printf("Б%3.0f", kitchen_timer::last_battery_percentage);
+            return;
+        }
+      }
+
       auto && wifi = id(wifi_component);
-      if(!wifi->is_disabled() && !wifi->is_connected()) {
-        it.print("WIFI");
-        return;
+      if(!wifi->is_disabled()) {
+        if(!wifi->is_connected()) {
+          it.print("WIFI");
+          return;
+        }
+
+        if(!id(ac_powered).state) {
+          it.print("СЕРВ");
+          return;
+        }
       }
 
       if (kitchen_timer::sntp::force_sync_scheduled) {
         it.print("sntp");
         return;
-      }
-
-      if(!isnan(kitchen_timer::last_battery_percentage)) {
-        if(kitchen_timer::last_battery_percentage < 3.f || 
-            (kitchen_timer::last_battery_percentage <  5.f && 0 == id(frame)/2 % 2) ||
-            (kitchen_timer::last_battery_percentage < 10.f && 0 == id(frame)/2 % 4) ||
-            (kitchen_timer::last_battery_percentage < 20.f && 0 == id(frame)/2 % 8) ||
-            (kitchen_timer::last_battery_percentage < 30.f && 0 == id(frame)/2 % 16) ||
-            (kitchen_timer::last_battery_percentage < 50.f && 0 == id(frame)/2 % 32) ||
-            (kitchen_timer::last_battery_percentage < 80.f && 0 == id(frame)/2 % 64)) {
-          it.printf("Б%3.0f", kitchen_timer::last_battery_percentage);
-          return;
-        }
       }
     }
 

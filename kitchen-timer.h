@@ -19,14 +19,14 @@ namespace kitchen_timer {
 RTC_DATA_ATTR float last_battery_percentage = NAN;
 
 namespace sntp {
-int64_t RTC_DATA_ATTR correction_us = 0;
-int64_t RTC_DATA_ATTR interval_us = 0;
-time_t RTC_DATA_ATTR sync_time = 0;
-bool force_sync_scheduled = false;
-struct timeval RTC_DATA_ATTR prev_sync;
-bool RTC_DATA_ATTR has_prev_sync = false;
-int call_counter = 0;
+RTC_DATA_ATTR int64_t correction_us_total = 0;
+RTC_DATA_ATTR uint64_t correction_us_abs_total = 0;
+RTC_DATA_ATTR int64_t up_time_us = 0;
+RTC_DATA_ATTR time_t sync_time = 0;
+RTC_DATA_ATTR struct timeval prev_sync;
+RTC_DATA_ATTR time_t first_sync_time = 0;
 
+bool force_sync_scheduled = false;
 bool is_time_to_force_sync() {
   time_t now;
   ::time(&now);
@@ -35,39 +35,28 @@ bool is_time_to_force_sync() {
              : now > sync_time + sntp_time->get_update_interval() / 1000 + 20;
 }
 
-void force_sync() {
-  if (force_sync_scheduled)
-    return;
-
-  // if ( !sntp_restart() ) {
-  //   ESP_LOGW(TAG, "Cant' schedule restart. Sntp is not running.");
-  // } else {
-  ESP_LOGD(TAG, "Sntp force sync scheduled.");
-  force_sync_scheduled = true;
-  // }
-}
-
 void sntp_sync_time(struct timeval *tv) {
-  call_counter++;
   force_sync_scheduled = false;
 
-  if (has_prev_sync &&
-      (prev_sync.tv_sec != tv->tv_sec || prev_sync.tv_usec != tv->tv_usec)) {
+  if (first_sync_time != 0) {
     struct timeval now;
     gettimeofday(&now, NULL);
-    correction_us =
+    const auto correction_us =
         (static_cast<int64_t>(tv->tv_sec) - static_cast<int64_t>(now.tv_sec)) *
             1000000 +
         static_cast<int64_t>(tv->tv_usec) - static_cast<int64_t>(now.tv_usec);
 
-    interval_us = (static_cast<int64_t>(tv->tv_sec) -
-                   static_cast<int64_t>(prev_sync.tv_sec)) *
-                      1000000 +
-                  static_cast<int64_t>(tv->tv_usec) -
-                  static_cast<int64_t>(prev_sync.tv_usec);
+    correction_us_abs_total += abs(correction_us);
+    if(correction_us_abs_total > static_cast<uint64_t>(1) << 63) {
+      correction_us_abs_total = abs(correction_us);
+      correction_us_total = 0;
+    }
+    correction_us_total += correction_us;
+
+  } else {
+    first_sync_time = tv->tv_sec;
   }
 
-  has_prev_sync = true;
   prev_sync = *tv;
   settimeofday(tv, NULL);
   sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
