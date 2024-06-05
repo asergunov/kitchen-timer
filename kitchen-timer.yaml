@@ -22,6 +22,7 @@ logger:
   logs:
     esp-idf: WARN
     web_server_idf: ERROR # Suppress warnings
+    component: ERROR # Suppress long update messages
   
   # level: DEBUG
   # logs:
