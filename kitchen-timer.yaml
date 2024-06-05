@@ -13,7 +13,7 @@ esp32:
       # CONFIG_PM_USE_RTC_TIMER_REF: y
       # CONFIG_PM_DFS_INIT_AUTO: y
       # CONFIG_ESP_INT_WDT: n
-      # TODO: enable me BACK! CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
+      CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
       # TODO: maybe needed CONFIG_SNTP_TIME_SYNC_METHOD_CUSTOM: y
 
 # Enable logging
@@ -111,8 +111,12 @@ esphome:
       #     App.set_loop_interval(100);
       - script.execute: update_screen_loop
       - script.execute: sntp_updater_loop
+      - script.execute: play_battery_animation
 
 globals:
+  # - id: playing_battery_animation_frame
+  #   type: uint8_t
+  #   initial_value: "0"
   - id: menu_exit_request
     type: bool
     initial_value: "false"
@@ -408,12 +412,15 @@ script:
     mode: single
     then:
       - lambda: |
-          id(tm1637_display).set_on(false);
-          id(tm1637_display).display();
           id(tm1637_display).update();
       - wait_until:
           condition:
             - binary_sensor.is_off: encoder_button
+      - lambda: |
+          id(tm1637_display).set_on(false);
+          id(tm1637_display).display();
+          id(tm1637_display).update();
+      - delay: 1ms
       - lambda: |
           auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
           if(result != ESP_OK) {
@@ -464,25 +471,32 @@ script:
 
           if(id(signal_song_index) > id(songs).size()) {
             ESP_LOGD(TAG, "Nothing to play");
-            id(play_signal).stop();
           } else {
             ESP_LOGI(TAG, "Starting to play song %d", id(signal_song_index));
             // schedule another song play
             id(play_signal).execute();
-            const auto messages = id(signal_message).size();
-            id(frame) = -1;
-          }          
-      - wait_until:
+            const auto& messages = id(signal_message).size();
+            if(messages > 0) {
+              id(frame) += messages * 2;
+              id(frame) -= id(frame) % (messages * 2);
+            }
+          }        
+      - if:
           condition:
-            - lambda:
-                return id(signal_stop_request);
-          timeout: 
-            minutes: 5
-      - lambda: |
-          ESP_LOGD(TAG, "Stop playing signal %d", id(signal_song_index));
-          id(signal_song_index) = static_cast<size_t>(-1);
-          id(signal_message).clear();
-      - rtttl.stop:
+            - lambda: |
+                return id(signal_song_index) < id(songs).size();
+          then:
+            - wait_until:
+                condition:
+                  - lambda:
+                      return id(signal_stop_request);
+                timeout: 
+                  minutes: 5
+            - lambda: |
+                ESP_LOGD(TAG, "Stop playing signal %d", id(signal_song_index));
+                id(signal_song_index) = static_cast<size_t>(-1);
+                id(signal_message).clear();
+            - rtttl.stop:
   - id: rotary_click
     mode: queued
     then:
@@ -713,6 +727,85 @@ script:
                       // id(tm1637_display).start_poller();
                 else:
                   - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
+  - id: play_battery_animation
+    then:
+      - number.set: 
+          id: display_intensity_number
+          value: !lambda return 1.f;
+      - component.update: light_sensor
+      - component.update: battery_voltage_unfiltered
+      - component.update: tm1637_display
+      - delay: 20ms
+      - component.update: light_sensor
+      - component.update: battery_voltage_unfiltered
+      - component.update: tm1637_display
+      - delay: 40ms
+      - component.update: light_sensor
+      - component.update: battery_voltage_unfiltered
+      - component.update: tm1637_display
+      - delay: 80ms
+      - component.update: light_sensor
+      - component.update: battery_voltage_unfiltered
+      - component.update: tm1637_display
+      - delay: 160ms
+      - component.update: light_sensor
+      - component.update: battery_voltage_unfiltered
+      - component.update: tm1637_display
+      - delay: 320ms
+      # - globals.set: 
+      #     id: playing_battery_animation_frame
+      #     value: !lambda return 1;
+      # - component.update: light_sensor
+      # - component.update: battery_voltage_unfiltered
+      # - delay: 10ms
+      # - component.update: light_sensor
+      # - component.update: battery_voltage_unfiltered
+      # - delay: 10ms
+      # - component.update: light_sensor
+      # - component.update: battery_voltage_unfiltered
+      # - globals.set: 
+      #     id: playing_battery_animation_frame
+      #     value: !lambda return 0;
+      # - delay: 10ms
+      # - component.update: light_sensor
+      # - component.update: battery_voltage_unfiltered
+      # - delay: 10ms
+      # - component.update: light_sensor
+      # - component.update: battery_voltage_unfiltered
+      # - while:
+      #     condition: 
+      #       - lambda: |
+      #           const auto& percentage = id(battery_percentage).state;
+      #           return id(playing_battery_animation_frame) < 1 + (isnan(percentage) ? 0.0f : percentage)*15.f/100.f;
+      #     then:
+      #       - lambda: |
+      #           id(playing_battery_animation_frame)++;
+      #       - component.update: tm1637_display
+      #       - delay: 10ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - component.update: tm1637_display
+      # - delay: 50ms
+      # - globals.set: 
+      #     id: playing_battery_animation_frame
+      #     value: !lambda return 0;
+      - component.update: tm1637_display
 
 sensor:
   - platform: template
@@ -884,7 +977,7 @@ sensor:
     accuracy_decimals: 4
     update_interval: 1s
     id: battery_voltage_unfiltered
-    name: Devider Voltage Unfiltered
+    name: Divider Voltage Unfiltered
     entity_category: diagnostic
     internal: True
     filters:
@@ -922,6 +1015,7 @@ sensor:
           alpha: 0.1
           send_every: 5
   - platform: copy
+    id: battery_percentage
     source_id: battery_voltage
     name: Battery
     device_class: battery
@@ -949,6 +1043,12 @@ sensor:
             - 4.032 -> 72.4
             - 4.153 -> 97.53
             - 4.2 -> 100.
+      - clamp: 
+          max_value: 100
+          min_value: 0
+      - lambda: |
+          kitchen_timer::last_battery_percentage = x;
+          return x;
 
   - platform: adc
     name: Battery Charging Current
@@ -1346,7 +1446,25 @@ display:
   update_interval: never
   intensity: 7
   lambda: |-
-    ESP_LOGD(TAG, "Displaying");
+    if(id(play_battery_animation).is_running() || id(deep_sleep_start).is_running()) {
+      if(isnan(kitchen_timer::last_battery_percentage)) {
+        it.printf("БАТА");
+        return;
+      }
+      it.printf("Б%3.0f", kitchen_timer::last_battery_percentage);
+      return;
+
+      // char buff[5] = {0,0,0,0,0};
+      // char sym[4] = {' ', '_', 'o', 'O'};
+      // auto remains = id(playing_battery_animation_frame);
+      // for(int i = 0; i<4; ++i) {
+      //   buff[i] = sym[std::min(uint8_t(3), remains)];
+      //   remains-=std::min(remains, uint8_t(3));
+      // }
+      // it.printf("%s", buff);
+      // return;
+    }
+
     if(!id(signal_message).empty()) {
       // it.set_on(true);
       ESP_LOGD(TAG, "Figuring out the message");
@@ -1383,6 +1501,19 @@ display:
       if (kitchen_timer::sntp::force_sync_scheduled) {
         it.print("sntp");
         return;
+      }
+
+      if(!isnan(kitchen_timer::last_battery_percentage)) {
+        if(kitchen_timer::last_battery_percentage < 3.f || 
+            (kitchen_timer::last_battery_percentage <  5.f && 0 == id(frame)/2 % 2) ||
+            (kitchen_timer::last_battery_percentage < 10.f && 0 == id(frame)/2 % 4) ||
+            (kitchen_timer::last_battery_percentage < 20.f && 0 == id(frame)/2 % 8) ||
+            (kitchen_timer::last_battery_percentage < 30.f && 0 == id(frame)/2 % 16) ||
+            (kitchen_timer::last_battery_percentage < 50.f && 0 == id(frame)/2 % 32) ||
+            (kitchen_timer::last_battery_percentage < 80.f && 0 == id(frame)/2 % 64)) {
+          it.printf("Б%3.0f", kitchen_timer::last_battery_percentage);
+          return;
+        }
       }
     }
 

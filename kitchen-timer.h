@@ -15,6 +15,9 @@
 static const char *const TAG = "kitchen-timer";
 
 namespace kitchen_timer {
+
+RTC_DATA_ATTR float last_battery_percentage = NAN;
+
 namespace sntp {
 int64_t RTC_DATA_ATTR correction_us = 0;
 int64_t RTC_DATA_ATTR interval_us = 0;
@@ -29,7 +32,7 @@ bool is_time_to_force_sync() {
   ::time(&now);
   return sync_time == 0
              ? false
-             : now > sync_time + sntp_time->get_update_interval() / 1000 + 10;
+             : now > sync_time + sntp_time->get_update_interval() / 1000 + 20;
 }
 
 void force_sync() {
@@ -66,9 +69,9 @@ void sntp_sync_time(struct timeval *tv) {
 
   has_prev_sync = true;
   prev_sync = *tv;
-  ::time(&sync_time);
   settimeofday(tv, NULL);
   sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
+  ::time(&sync_time);
 }
 
 } // namespace sntp
