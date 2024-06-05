@@ -460,6 +460,10 @@ script:
 
           App.run_safe_shutdown_hooks();
           esp_deep_sleep_start();
+      - lambda: |
+          id(tm1637_display).set_on(true);
+          id(tm1637_display).display();
+          id(tm1637_display).update();
   - id: play_signal
     mode: queued
     then:
@@ -1013,12 +1017,48 @@ sensor:
       - exponential_moving_average:
           alpha: 0.1
           send_every: 5
+    on_value: 
+      then:
+        - component.update: battery_percentage_charging
+  - platform: template
+    id: battery_percentage_charging
+    update_interval: never
+    internal: True
+    lambda: |
+      const auto& current = id(charging_current_fast).state;
+      if(!isnan(current) && current < 700.f) {
+        return ((2.777917E-09*current - 3.485291E-06) * current + 6.349001E-04) * current + 9.741163E-01;
+      }
+
+      const auto& voltage = id(charging_voltage).state;
+      if(isnan(voltage)) return NAN;
+
+      if(voltage < 3.85) {
+        return ((((1.868547E+00 * voltage 
+                      - 3.227461E+01) * voltage 
+                    + 2.229068E+02) * voltage 
+                  - 7.694095E+02) * voltage
+                + 1.327192E+03) * voltage
+              - 9.152133E+02;
+      }
+
+      if(voltage < 4.18) {
+        return 1.152195E+00 * voltage - 4.398499E+00;
+      }
+
+      return ((1.261992E+03 * voltage 
+            - 1.595949E+04) * voltage 
+          + 6.727692E+04) * voltage 
+        - 9.453564E+04;
+    filters:
+      - multiply: 100
+    on_value: 
+      then:
+        - component.update: battery_percentage
   - platform: copy
-    id: battery_percentage
+    id: battery_percentage_discharging
     source_id: battery_voltage
-    name: Battery
-    device_class: battery
-    unit_of_measurement: "%"
+    internal: True
     filters:
       - calibrate_linear:
           method: exact
@@ -1042,6 +1082,20 @@ sensor:
             - 4.032 -> 72.4
             - 4.153 -> 97.53
             - 4.2 -> 100.
+    on_value: 
+      then:
+        - component.update: battery_percentage
+  - platform: template
+    id: battery_percentage
+    name: Battery
+    device_class: battery
+    unit_of_measurement: "%"
+    update_interval: never
+    lambda: |
+      return id(charging_sensor).state 
+        ? id(battery_percentage_charging).state 
+        : id(battery_percentage_discharging).state;
+    filters:
       - clamp: 
           max_value: 100
           min_value: 0
@@ -1064,6 +1118,9 @@ sensor:
     filters:
       - lambda: |
             return id(charging_sensor).state ? x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/ : NAN;
+    on_value: 
+      then:
+        - component.update: battery_percentage_charging
 
 binary_sensor:
   - platform: gpio
@@ -1114,6 +1171,9 @@ binary_sensor:
       mode:
         input: True
         pullup: True
+    on_state: 
+      then:
+        - component.update: battery_percentage
   - platform: gpio
     name: Power Fully Charged
     id: fully_charged
