@@ -350,17 +350,17 @@ time:
     update_interval: 5min
 
 switch:
-  # - platform: template
-  #   name: SNTP Immediate Update
-  #   entity_category: CONFIG
-  #   lambda: |
-  #     return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
-  #   turn_on_action: 
-  #     then:
-  #       lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
-  #   turn_off_action: 
-  #     then:
-  #       lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+  - platform: template
+    name: SNTP Immediate Update
+    entity_category: CONFIG
+    lambda: |
+      return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
+    turn_on_action: 
+      then:
+        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+    turn_off_action: 
+      then:
+        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
