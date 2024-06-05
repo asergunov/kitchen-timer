@@ -216,11 +216,19 @@ ota:
   on_begin:
     then:
       - switch.turn_off: power_saving
+      - rtttl.stop:
+      - globals.set: 
+          id: ota_progress
+          value: !lambda return 0;
   on_error:
     then:
       - switch.turn_on: power_saving
+      - globals.set: 
+          id: ota_progress
+          value: !lambda return NAN;
   on_progress: 
     then:
+      - rtttl.stop:
       - globals.set: 
           id: ota_progress
           value: !lambda return x;
@@ -342,21 +350,22 @@ time:
     update_interval: 5min
 
 switch:
-  - platform: template
-    name: SNTP Immediate Update
-    entity_category: CONFIG
-    lambda: |
-      return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
-    turn_on_action: 
-      then:
-        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
-    turn_off_action: 
-      then:
-        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+  # - platform: template
+  #   name: SNTP Immediate Update
+  #   entity_category: CONFIG
+  #   lambda: |
+  #     return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
+  #   turn_on_action: 
+  #     then:
+  #       lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+  #   turn_off_action: 
+  #     then:
+  #       lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
     name: Power Saving
+    internal: True
     entity_category: CONFIG
     pin:
       number: ${power_sawing_pin}
@@ -892,7 +901,7 @@ sensor:
     entity_category: diagnostic
     name: SNTP Average Correction
     accuracy_decimals: 2
-    unit_of_measurement: s/year
+    unit_of_measurement: s/day
     state_class: measurement
     lambda: |
       if(kitchen_timer::sntp::first_sync_time == 0)
@@ -900,7 +909,7 @@ sensor:
       const auto uptime = kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time;
       if(uptime == 0)
         return NAN;
-      return float(kitchen_timer::sntp::correction_us_total) / 1000.f / float(uptime) * 60.f * 60.f * 24.f * 365.f;
+      return float(kitchen_timer::sntp::correction_us_total) / 1000.f / float(uptime) * 60.f * 60.f * 24.f;
   - platform: debug
     free:
       name: "Heap Free"
@@ -1320,13 +1329,6 @@ button:
     on_press:
       then:
         - script.execute: deep_sleep_start
-  - platform: template
-    entity_category: config
-    name: SNTP Sync
-    on_press: 
-      then:
-        - lambda: 
-            sntp_restart();
 number:
   - platform: template
     name: Display Intensity
