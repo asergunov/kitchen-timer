@@ -356,16 +356,19 @@ switch:
     entity_category: CONFIG
     restore_mode: RESTORE_DEFAULT_ON
     lambda: |
+      if(!esp_sntp_enabled()) return {};
       return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
     turn_on_action: 
       then:
         lambda: |
+          if(!esp_sntp_enabled()) return;
           // esp_sntp_stop();
           sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
           // esp_sntp_init();
     turn_off_action: 
       then:
         lambda: |
+          if(!esp_sntp_enabled()) return;
           // esp_sntp_stop();
           sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
           // esp_sntp_init();
