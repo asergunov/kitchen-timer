@@ -28,13 +28,6 @@ RTC_DATA_ATTR time_t first_sync_time = 0;
 RTC_DATA_ATTR uint32_t sync_count = 0;
 
 bool force_sync_scheduled = false;
-bool is_time_to_force_sync() {
-  time_t now;
-  ::time(&now);
-  return sync_try_time == 0
-             ? true
-             : now > sync_try_time + sntp_time->get_update_interval() / 1000 + 20;
-}
 
 void sntp_sync_time(struct timeval *tv) {
   sync_count++;

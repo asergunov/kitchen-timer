@@ -14,7 +14,7 @@ esp32:
       # CONFIG_PM_DFS_INIT_AUTO: y
       # CONFIG_ESP_INT_WDT: n
       CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
-      # TODO: maybe needed CONFIG_SNTP_TIME_SYNC_METHOD_CUSTOM: y
+      CONFIG_LWIP_SNTP_MAX_SERVERS: '3'
 
 # Enable logging
 logger:
@@ -338,8 +338,9 @@ wireguard:
   peer_public_key: !secret kitchen_timer.wireguard.peer_public_key
   peer_preshared_key: !secret kitchen_timer.wireguard.peer_preshared_key
   # peer_allowed_ips: 
-  #   - 192.168.1.0/24
-  #   - 192.168.2.0/24
+    # - 192.168.1.0/24
+    # - 192.168.2.0/24
+    # - 0.0.0.0/0
   peer_endpoint: !secret kitchen_timer.wireguard.peer_endpoint
   peer_port: !secret kitchen_timer.wireguard.peer_port
   peer_persistent_keepalive: !secret kitchen_timer.wireguard.peer_persistent_keepalive
@@ -349,6 +350,13 @@ time:
     id: sntp_time
     timezone: ${timezone}
     update_interval: 5min
+    servers: 
+      - 0.pool.ntp.org
+      # - 1.pool.ntp.org
+      # - 2.pool.ntp.org
+      # - 192.168.2.1
+      - 224.0.1.1
+      - 192.168.1.1
 
 switch:
   - platform: template
@@ -582,6 +590,15 @@ script:
           condition:
             - lambda: return true;
           then:
+            - if:
+                condition: 
+                  or:
+                    - not:
+                        time.has_time:
+                    - lambda: |
+                        time_t now;
+                        ::time(&now);
+                        return now > kitchen_timer::sntp::sync_try_time + id(sntp_time).get_update_interval() / 1000 + 20;
             - lambda: |
                 if(kitchen_timer::sntp::is_time_to_force_sync())
                   kitchen_timer::sntp::force_sync_scheduled = true;
@@ -589,10 +606,14 @@ script:
                 condition:
                   - lambda: return !kitchen_timer::sntp::force_sync_scheduled;
                 timeout: 10s
-            - lambda: |
-                kitchen_timer::sntp::force_sync_scheduled = false;
-                ::time(&kitchen_timer::sntp::sync_try_time);
-            - delay: 10ms
+            - if:
+                condition: 
+                  - time.has_time: 
+                then: 
+                  - lambda: |
+                      kitchen_timer::sntp::force_sync_scheduled = false;
+                      ::time(&kitchen_timer::sntp::sync_try_time);
+            - delay: 1s
 
   - id: update_display_loop
     then:
@@ -879,6 +900,16 @@ script:
       - component.update: tm1637_display
 
 sensor:
+  - platform: wireguard
+    latest_handshake:
+      name: 'WireGuard Latest Handshake'
+  - platform: template
+    name: SNTP Sync interval
+    entity_category: DIAGNOSTIC
+    update_interval: 5s
+    device_class: duration
+    unit_of_measurement: ms
+    lambda: return sntp_get_sync_interval();
   - platform: template
     id: sntp_start_time_sensor
     name: SNTP Start
@@ -1227,6 +1258,12 @@ sensor:
         - component.update: battery_percentage_charging
 
 binary_sensor:
+  - platform: template
+    name: SNTP Enabled
+    entity_category: DIAGNOSTIC
+    lambda: return esp_sntp_enabled();
+    publish_initial_state: True
+    
   - platform: gpio
     id: encoder_button
     name: Encoder Button
@@ -1345,10 +1382,62 @@ binary_sensor:
           
 
 text_sensor:
+  - platform: template
+    name: SNTP IP 1
+    update_interval: 5s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      auto&& ret = esp_sntp_getserver(0);
+      if(ret)
+        return esphome::network::IPAddress(ret).str();
+      return {};
+  - platform: template
+    name: SNTP IP 2
+    update_interval: 5s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      auto&& ret = esp_sntp_getserver(1);
+      if(ret)
+        return esphome::network::IPAddress(ret).str();
+      return {};
+  - platform: template
+    name: SNTP IP 3
+    update_interval: 5s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      auto&& ret = esp_sntp_getserver(2);
+      if(ret)
+        return esphome::network::IPAddress(ret).str();
+      return {};
+  - platform: template
+    name: SNTP Server 1
+    update_interval: 5s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      auto&& ret = esp_sntp_getservername(0);
+      if(ret) return {ret};
+      return {};
+  - platform: template
+    name: SNTP Server 2
+    update_interval: 5s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      auto&& ret = esp_sntp_getservername(1);
+      if(ret) return {ret};
+      return {};
+  - platform: template
+    name: SNTP Server 3
+    update_interval: 5s
+    entity_category: DIAGNOSTIC
+    lambda: |
+      auto&& ret = esp_sntp_getservername(2);
+      if(ret) return {ret};
+      return {};
   - platform: wireguard
     address:
       entity_category: DIAGNOSTIC
       name: 'WireGuard Address'
+    
   - platform: template
     name: SNTP Status
     update_interval: 5s
