@@ -38,7 +38,9 @@ bool is_time_to_force_sync() {
 void sntp_sync_time(struct timeval *tv) {
   force_sync_scheduled = false;
 
-  if (first_sync_time != 0) {
+  if (first_sync_time == 0) {
+    first_sync_time = tv->tv_sec;
+  } else {
     struct timeval now;
     gettimeofday(&now, NULL);
     const auto correction_us =
@@ -52,9 +54,6 @@ void sntp_sync_time(struct timeval *tv) {
       correction_us_total = 0;
     }
     correction_us_total += correction_us;
-
-  } else {
-    first_sync_time = tv->tv_sec;
   }
 
   prev_sync = *tv;

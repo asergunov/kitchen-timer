@@ -354,14 +354,21 @@ switch:
   - platform: template
     name: SNTP Immediate Update
     entity_category: CONFIG
+    restore_mode: RESTORE_DEFAULT_ON
     lambda: |
       return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
     turn_on_action: 
       then:
-        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+        lambda: |
+          // esp_sntp_stop();
+          sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+          // esp_sntp_init();
     turn_off_action: 
       then:
-        lambda: sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+        lambda: |
+          // esp_sntp_stop();
+          sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+          // esp_sntp_init();
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
@@ -868,6 +875,26 @@ script:
 
 sensor:
   - platform: template
+    id: sntp_start_time_sensor
+    name: SNTP Start
+    entity_category: DIAGNOSTIC
+    device_class: timestamp
+    update_interval: 15s
+    lambda: |
+      if(kitchen_timer::sntp::first_sync_time)
+        return kitchen_timer::sntp::first_sync_time;
+      return NAN;
+  - platform: template
+    id: sntp_sync_time_sensor
+    name: SNTP Sync
+    entity_category: DIAGNOSTIC
+    device_class: timestamp
+    update_interval: 15s
+    lambda: |
+      if(kitchen_timer::sntp::prev_sync.tv_sec)
+        return kitchen_timer::sntp::prev_sync.tv_sec;
+      return NAN;
+  - platform: template
     id: sntp_correction_abs_total
     name: SNTP Absolute Correction Total
     entity_category: diagnostic
@@ -893,6 +920,7 @@ sensor:
     unit_of_measurement: s
     device_class: duration
     state_class: total_increasing
+    update_interval: never
     lambda: |
       return kitchen_timer::sntp::first_sync_time == 0 
         ? NAN
@@ -1080,31 +1108,26 @@ sensor:
     update_interval: never
     internal: True
     lambda: |
-      const auto& current = id(charging_current_fast).state;
-      if(!isnan(current) && current < 700.f) {
-        return ((2.777917E-09*current - 3.485291E-06) * current + 6.349001E-04) * current + 9.741163E-01;
-      }
-
       const auto& voltage = id(charging_voltage).state;
-      if(isnan(voltage)) return NAN;
+      const auto& current = id(charging_current_fast).state;
+      auto by_voltage1=[&]{
+        return (((1.012798E+00f * voltage - 1.428660E+01f) * voltage + 7.558094E+01f) * voltage - 1.776824E+02f) * voltage + 1.565834E+02f;
+      };
+      auto by_voltage2=[&]{
+        return 1.297578E+00f * voltage - 5.037708E+00f;
+      };
+      auto by_current = [&]{
+        return (((-2.434210E-12f * current + 5.696992E-09f) * current - 4.372896E-06f) * current + 6.284777E-04f) * current + 9.910878E-01f;
+      };
+      if(isnan(voltage) && isnan(current)) return NAN;
+      if(isnan(voltage)) return by_current();
 
-      if(voltage < 3.85) {
-        return ((((1.868547E+00 * voltage 
-                      - 3.227461E+01) * voltage 
-                    + 2.229068E+02) * voltage 
-                  - 7.694095E+02) * voltage
-                + 1.327192E+03) * voltage
-              - 9.152133E+02;
-      }
-
-      if(voltage < 4.18) {
-        return 1.152195E+00 * voltage - 4.398499E+00;
-      }
-
-      return ((1.261992E+03 * voltage 
-            - 1.595949E+04) * voltage 
-          + 6.727692E+04) * voltage 
-        - 9.453564E+04;
+      const auto result = by_voltage2();
+      return result < 0.1f 
+        ? max(result, by_voltage1()) 
+        : result > 0.4 
+          ? max(result, by_current()) 
+          : result;
     filters:
       - multiply: 100
     on_value: 
@@ -1306,19 +1329,21 @@ text_sensor:
     update_interval: 15s
     entity_category: DIAGNOSTIC
     lambda: |
+      id(sntp_correction_abs_total).update();
+      id(sntp_correction_total).update();
+      id(sntp_uptime).update();
+      id(sntp_start_time_sensor).update();
+      id(sntp_sync_time_sensor).update();
+      id(sntp_avg_correction).update();
       switch(sntp_get_sync_status()) {
         case SNTP_SYNC_STATUS_COMPLETED:
-          id(sntp_correction_abs_total).update();
-          id(sntp_correction_total).update();
-          id(sntp_uptime).update();
-          id(sntp_avg_correction).update();
           return std::string("Completed");
         case SNTP_SYNC_STATUS_RESET:
           return std::string("Reset");
         case SNTP_SYNC_STATUS_IN_PROGRESS:
           return std::string("In Progress");
       }
-      return std::string();
+      return std::string();    
 
 button:
   - platform: restart
