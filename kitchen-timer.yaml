@@ -586,7 +586,7 @@ script:
                 timeout: 10s
             - lambda: |
                 kitchen_timer::sntp::force_sync_scheduled = false;
-                ::time(&kitchen_timer::sntp::sync_time);
+                ::time(&kitchen_timer::sntp::sync_try_time);
             - delay: 10ms
 
   - id: update_display_loop
@@ -879,7 +879,7 @@ sensor:
     name: SNTP Start
     entity_category: DIAGNOSTIC
     device_class: timestamp
-    update_interval: 15s
+    update_interval: 5s
     lambda: |
       if(kitchen_timer::sntp::first_sync_time)
         return kitchen_timer::sntp::first_sync_time;
@@ -889,11 +889,19 @@ sensor:
     name: SNTP Sync
     entity_category: DIAGNOSTIC
     device_class: timestamp
-    update_interval: 15s
+    update_interval: 5s
     lambda: |
       if(kitchen_timer::sntp::prev_sync.tv_sec)
         return kitchen_timer::sntp::prev_sync.tv_sec;
       return NAN;
+  - platform: template
+    id: sntp_sync_try_time_sensor
+    name: SNTP Try Sync
+    entity_category: DIAGNOSTIC
+    device_class: timestamp
+    update_interval: 5s
+    lambda: |
+      return kitchen_timer::sntp::sync_try_time;
   - platform: template
     id: sntp_correction_abs_total
     name: SNTP Absolute Correction Total
@@ -901,6 +909,7 @@ sensor:
     accuracy_decimals: 3
     unit_of_measurement: ms
     state_class: total_increasing
+    update_interval: 5s
     lambda: |
       return float(kitchen_timer::sntp::correction_us_abs_total)/1000.0f;
   - platform: template
@@ -910,6 +919,7 @@ sensor:
     accuracy_decimals: 3
     unit_of_measurement: ms
     state_class: total
+    update_interval: 5s
     lambda: |
       return float(kitchen_timer::sntp::correction_us_total)/1000.0f;
   - platform: template
@@ -920,11 +930,20 @@ sensor:
     unit_of_measurement: s
     device_class: duration
     state_class: total_increasing
-    update_interval: never
+    update_interval: 5s
     lambda: |
       return kitchen_timer::sntp::first_sync_time == 0 
         ? NAN
         : float(kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time);
+  - platform: template
+    id: sntp_sync_count
+    entity_category: diagnostic
+    name: SNTP Sync calls
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 5s
+    lambda: |
+      return kitchen_timer::sntp::sync_count;
   - platform: template
     id: sntp_avg_correction
     entity_category: diagnostic
@@ -932,6 +951,7 @@ sensor:
     accuracy_decimals: 2
     unit_of_measurement: s/day
     state_class: measurement
+    update_interval: 5s
     lambda: |
       if(kitchen_timer::sntp::first_sync_time == 0)
         return NAN;
@@ -1326,7 +1346,7 @@ text_sensor:
       name: 'WireGuard Address'
   - platform: template
     name: SNTP Status
-    update_interval: 15s
+    update_interval: 5s
     entity_category: DIAGNOSTIC
     lambda: |
       id(sntp_correction_abs_total).update();
@@ -1335,6 +1355,7 @@ text_sensor:
       id(sntp_start_time_sensor).update();
       id(sntp_sync_time_sensor).update();
       id(sntp_avg_correction).update();
+      id(sntp_sync_count).update();
       switch(sntp_get_sync_status()) {
         case SNTP_SYNC_STATUS_COMPLETED:
           return std::string("Completed");
@@ -1653,20 +1674,18 @@ display:
       }
 
       auto && wifi = id(wifi_component);
-      if(!wifi->is_disabled()) {
-        if(!wifi->is_connected()) {
+      if(!wifi->is_disabled() && !wifi->is_connected()) {
           it.print("WIFI");
           return;
         }
 
-        if(!id(ac_powered).state) {
-          it.print("СЕРВ");
-          return;
-        }
-      }
-
       if (kitchen_timer::sntp::force_sync_scheduled) {
         it.print("sntp");
+          return;
+      }
+
+      if(!wifi->is_disabled() && !id(ac_powered).state) {
+        it.print("СЕРВ");
         return;
       }
     }
