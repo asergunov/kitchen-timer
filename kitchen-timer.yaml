@@ -1682,11 +1682,11 @@ display:
       if(!wifi->is_disabled() && !wifi->is_connected()) {
           it.print("WIFI");
           return;
-        }
+      }
 
       if (kitchen_timer::sntp::force_sync_scheduled) {
         it.print("sntp");
-          return;
+        return;
       }
 
       if(!wifi->is_disabled() && !id(ac_powered).state) {
