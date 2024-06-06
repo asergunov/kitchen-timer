@@ -365,6 +365,7 @@ switch:
           // esp_sntp_stop();
           sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
           // esp_sntp_init();
+          sntp_restart();
     turn_off_action: 
       then:
         lambda: |
@@ -372,6 +373,7 @@ switch:
           // esp_sntp_stop();
           sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
           // esp_sntp_init();
+          sntp_restart();
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
