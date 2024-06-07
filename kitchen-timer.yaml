@@ -48,6 +48,10 @@ external_components:
     components:
       - template
     refresh: 0s
+  - source: "github://asergunov/esphome_esphome@sntp"
+    components:
+      - sntp
+    refresh: 0s
   - source: ./components
     components:
       - daily_signal
@@ -357,6 +361,11 @@ time:
       # - 192.168.2.1
       - 224.0.1.1
       - 192.168.1.1
+    on_time_sync:
+      then:
+      - logger.log: 
+          level: INFO
+          format: "SNTP Synchronized"
 
 switch:
   - platform: template
@@ -370,10 +379,7 @@ switch:
       then:
         lambda: |
           if(!esp_sntp_enabled()) return;
-          // esp_sntp_stop();
           sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
-          // esp_sntp_init();
-          sntp_restart();
     turn_off_action: 
       then:
         lambda: |
@@ -1439,29 +1445,6 @@ text_sensor:
     address:
       entity_category: DIAGNOSTIC
       name: 'WireGuard Address'
-    
-  - platform: template
-    name: SNTP Status
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      id(sntp_correction_abs_total).update();
-      id(sntp_correction_total).update();
-      id(sntp_uptime).update();
-      id(sntp_start_time_sensor).update();
-      id(sntp_sync_time_sensor).update();
-      id(sntp_avg_correction).update();
-      id(sntp_sync_count).update();
-      switch(sntp_get_sync_status()) {
-        case SNTP_SYNC_STATUS_COMPLETED:
-          return std::string("Completed");
-        case SNTP_SYNC_STATUS_RESET:
-          return std::string("Reset");
-        case SNTP_SYNC_STATUS_IN_PROGRESS:
-          return std::string("In Progress");
-      }
-      return std::string();    
-
 button:
   - platform: restart
     name: Restart device
@@ -1472,7 +1455,30 @@ button:
     on_press:
       then:
         - script.execute: deep_sleep_start
+  - platform: template
+    name: SNTP Sync now
+    entity_category: config
+    on_press:
+      then:
+        - component.update: sntp_time
 number:
+  - platform: template
+    id: sntp_sync_interval_hours
+    name: SNTP Sync Interval (hours)
+    entity_category: CONFIG
+    min_value: 0
+    max_value: 48
+    step: 0.01
+    device_class: duration
+    restore_value: True
+    optimistic: True
+    initial_value: 1
+    # lambda: |
+    #   return id(sntp_time).get_update_interval()/1000.f/60.f/60.f;
+    set_action: 
+      then:
+        - lambda: |
+            id(sntp_time).set_update_interval(1000.f /* ms/s */ * 60.f /* s/m */ *60.f /* m/h */ * x /* h */ );
   - platform: template
     name: Display Intensity
     entity_category: CONFIG
