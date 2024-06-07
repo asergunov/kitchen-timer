@@ -592,27 +592,29 @@ script:
           then:
             - if:
                 condition: 
-                  or:
-                    - not:
-                        time.has_time:
-                    - lambda: |
-                        time_t now;
-                        ::time(&now);
-                        return now > kitchen_timer::sntp::sync_try_time + id(sntp_time).get_update_interval() / 1000 + 20;
-            - lambda: |
-                if(kitchen_timer::sntp::is_time_to_force_sync())
-                  kitchen_timer::sntp::force_sync_scheduled = true;
+                  - or:
+                      - not:
+                          - time.has_time:
+                      - lambda: |
+                          time_t now;
+                          ::time(&now);
+                          return now > kitchen_timer::sntp::sync_try_time + id(sntp_time).get_update_interval() / 1000 + 20;
+                then:
+                  - lambda: |
+                      kitchen_timer::sntp::force_sync_scheduled = true;
             - wait_until:
                 condition:
                   - lambda: return !kitchen_timer::sntp::force_sync_scheduled;
                 timeout: 10s
             - if:
-                condition: 
-                  - time.has_time: 
+                condition:
+                  - time.has_time:
                 then: 
                   - lambda: |
-                      kitchen_timer::sntp::force_sync_scheduled = false;
-                      ::time(&kitchen_timer::sntp::sync_try_time);
+                      if(kitchen_timer::sntp::force_sync_scheduled) {
+                        kitchen_timer::sntp::force_sync_scheduled = false;
+                        ::time(&kitchen_timer::sntp::sync_try_time);
+                      }
             - delay: 1s
 
   - id: update_display_loop

@@ -21,6 +21,7 @@ RTC_DATA_ATTR float last_battery_percentage = NAN;
 namespace sntp {
 RTC_DATA_ATTR int64_t correction_us_total = 0;
 RTC_DATA_ATTR uint64_t correction_us_abs_total = 0;
+RTC_DATA_ATTR int64_t behind_us = 0;
 RTC_DATA_ATTR int64_t up_time_us = 0;
 RTC_DATA_ATTR time_t sync_try_time = 0;
 RTC_DATA_ATTR struct timeval prev_sync;
@@ -38,11 +39,12 @@ void sntp_sync_time(struct timeval *tv) {
   } else {
     struct timeval now;
     gettimeofday(&now, NULL);
-    const auto correction_us =
+    const auto correction_us_raw =
         (static_cast<int64_t>(tv->tv_sec) - static_cast<int64_t>(now.tv_sec)) *
             1000000 +
         static_cast<int64_t>(tv->tv_usec) - static_cast<int64_t>(now.tv_usec);
-
+    const auto correction_us = correction_us_raw - behind_us;
+    behind_us = correction_us_raw;
     correction_us_abs_total += abs(correction_us);
     if(correction_us_abs_total > static_cast<uint64_t>(1) << 63) {
       correction_us_abs_total = abs(correction_us);
