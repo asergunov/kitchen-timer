@@ -28,7 +28,7 @@ logger:
   logs:
     esp-idf: WARN
     web_server_idf: ERROR # Suppress warnings
-    component: ERROR # Suppress long update messages
+    # component: ERROR # Suppress long update messages
   
   # level: DEBUG
   # logs:
@@ -142,8 +142,17 @@ esphome:
       - script.execute: update_display_loop
       - script.execute: sntp_updater_loop
       - script.execute: play_battery_animation
+      - script.execute: sntp_update_interval_setup
 
 globals:
+  - id: sntp_ac_interval
+    type: float
+    initial_value: "60 * 60" # 1h interval
+    restore_value: True
+  - id: sntp_battery_interval
+    type: float
+    initial_value: "NAN" # Don't update
+    restore_value: True
   - id: sleep_back
     type: bool
     initial_value: "false"
@@ -376,7 +385,7 @@ wireguard:
 
 time:
   - platform: sntp
-    id: sntp_time
+    id: sntp_component
     timezone: ${timezone}
     update_interval: 5min
     servers: 
@@ -445,28 +454,29 @@ switch:
             id(tm1637_display).set_inverted(false);
         - component.update: tm1637_display
   - platform: template
-    id: ticking_switch
-    name: Tick Sound
+    id: sound_tick_switch
+    name: Sound Tick
     optimistic: True
     entity_category: CONFIG
     restore_mode: RESTORE_DEFAULT_OFF
+  - platform: template
+    id: sound_menu_switch
+    name: Sound Menu
+    optimistic: True
+    entity_category: CONFIG
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: template
+    id: sound_timer_tick_switch
+    name: Sound Timer Tick
+    optimistic: True
+    entity_category: CONFIG
+    restore_mode: RESTORE_DEFAULT_ON
   - platform: template
     id: online_on_battery
     name: Battery Stay online
     optimistic: True
     entity_category: CONFIG
     restore_mode: RESTORE_DEFAULT_OFF
-  - platform: template
-    entity_category: CONFIG
-    name: 'WireGuard Enabled'
-    lambda: return id(wireguard_component).is_enabled();
-    restore_mode: RESTORE_DEFAULT_ON
-    turn_on_action: 
-      then:
-        - wireguard.enable:
-    turn_off_action: 
-      then:
-        - wireguard.disable:
  
 output:
   - platform: ledc
@@ -487,6 +497,14 @@ i2c:
     scl: $scl_pin
 
 script:
+  - id: sntp_update_interval_setup
+    mode: restart
+    then: 
+      - lambda: |
+          const auto& value = id(ac_powered).state ? id(sntp_ac_interval) : id(sntp_battery_interval);
+          id(sntp_component).set_update_interval(isnan(value) 
+            ? 4294967295UL // Found in main.cpp. Magic never value?
+            : uint32_t(value*1e3f));
   - id: deep_sleep_start
     mode: single
     then:
@@ -603,7 +621,14 @@ script:
     then:
       - if:
           condition:
-            - switch.is_on: ticking_switch
+            or:
+              - switch.is_on: sound_tick_switch
+              - lambda: |
+                  const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+                  auto i = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
+                    return !!timer->get_seconds_remain();
+                  });
+                  return i != timer_list.end();
           then:
             - if:
                 condition: rtttl.is_playing
@@ -638,16 +663,21 @@ script:
                       - not:
                           - time.has_time:
                       - lambda: |
+                          const auto& interval = id(ac_powered) ? id(sntp_ac_interval) : id(sntp_battery_interval);
+                          if(isnan(interval))
+                            return false;
                           time_t now;
                           ::time(&now);
-                          return now > kitchen_timer::sntp::sync_try_time + id(sntp_time).get_update_interval() / 1000 + 20;
+                          return now - kitchen_timer::sntp::sync_try_time > time_t(interval) + id(sntp_component).get_update_interval() + 20;
                 then:
                   - lambda: |
                       kitchen_timer::sntp::force_sync_scheduled = true;
+                  - component.update: sntp_component
             - wait_until:
                 condition:
                   - lambda: return !kitchen_timer::sntp::force_sync_scheduled;
-                timeout: 10s
+                timeout: !lambda |
+                  return id(sntp_battery_sync_timeout).state * 1000;
             - if:
                 condition:
                   - time.has_time:
@@ -1060,6 +1090,7 @@ sensor:
     accuracy_decimals: 0
     state_class: total_increasing
     update_interval: never
+    unit_of_measurement: '#'
     lambda: |
       return kitchen_timer::sntp::sync_count;
   - platform: template
@@ -1140,7 +1171,11 @@ sensor:
                   - display_menu.show_main:
     on_value:
       then:
-        - script.execute: rotary_click
+        if:
+          condition:
+            - switch.is_on: sound_menu_switch
+          then:
+            - script.execute: rotary_click
 
   - platform: veml7700
     id: light_sensor
@@ -1442,39 +1477,32 @@ binary_sensor:
     entity_category: DIAGNOSTIC
     lambda: |
       return id(fully_charged).state || id(charging_sensor).state;
-    on_press: 
-      lambda: |
-        esp_pm_config_esp32c3_t config;
-        auto result = esp_pm_get_configuration(&config);
-        if(ESP_OK != result) {
-          ESP_LOGE(TAG, "Can't get pm config, error %d", result);
-          return;
-        }
-        config.max_freq_mhz = 160;
-        config.min_freq_mhz = 160;
-        config.light_sleep_enable = false;
-        result = esp_pm_configure(&config);
-        if(ESP_OK != result) {
-          ESP_LOGE(TAG, "Can't set pm config, error %d", result);
-          return;
-        }
-    on_release: 
-      - lambda: |
-          esp_pm_config_esp32c3_t config;
-          auto result = esp_pm_get_configuration(&config);
-          if(ESP_OK != result) {
-            ESP_LOGE(TAG, "Can't get pm config, error %d", result);
-            return;
-          }
-          config.max_freq_mhz = 80;
-          config.min_freq_mhz = 80;
-          config.light_sleep_enable = false;
-          result = esp_pm_configure(&config);
-          if(ESP_OK != result) {
-            ESP_LOGE(TAG, "Can't set pm config, error %d", result);
-            return;
-          }
-        
+    on_state: 
+      then:
+        - lambda: |
+            auto index = id(wireguard_select).active_index();
+            if(!index.has_value() || index.value() != 1)
+              return;
+            if(x)
+              id(wireguard_component).enable();
+            else
+              id(wireguard_component).disable();
+        - lambda: |
+            esp_pm_config_esp32c3_t config;
+            auto result = esp_pm_get_configuration(&config);
+            if(ESP_OK != result) {
+              ESP_LOGE(TAG, "Can't get pm config, error %d", result);
+              return;
+            }
+            config.max_freq_mhz = x ? 160 : 80;
+            config.min_freq_mhz = x ? 160 : 80;
+            // config.light_sleep_enable = !x;
+            result = esp_pm_configure(&config);
+            if(ESP_OK != result) {
+              ESP_LOGE(TAG, "Can't set pm config, error %d", result);
+              return;
+            }
+        - script.execute: sntp_update_interval_setup
         
   - platform: wireguard
     status:
@@ -1563,11 +1591,53 @@ button:
     entity_category: config
     on_press:
       then:
-        - component.update: sntp_time
+        - component.update: sntp_component
 number:
   - platform: template
+    name: SNTP AC Sync Interval
+    lambda: return id(sntp_ac_interval)/60.f;
+    unit_of_measurement: min
+    min_value: 0
+    max_value: 10080 # week
+    step: 1
+    entity_category: CONFIG
+    device_class: duration
+    set_action: 
+      then:
+        - globals.set: 
+            id: sntp_ac_interval
+            value: !lambda |
+              return 60.f*(x > 10079.0f ? NAN : x);
+        - script.execute: sntp_update_interval_setup
+  - platform: template
+    name: SNTP Battery Sync Interval
+    lambda: return id(sntp_battery_interval)/60.f;
+    unit_of_measurement: min
+    min_value: 0
+    max_value: 10080 # week
+    step: 1
+    entity_category: CONFIG
+    device_class: duration
+    set_action: 
+      then:
+        - globals.set: 
+            id: sntp_battery_interval
+            value: !lambda |
+              return (x > 10079.0f ? NAN : x);
+        - script.execute: sntp_update_interval_setup
+  - platform: template
+    id: sntp_battery_sync_timeout
+    name: SNTP Battery Sync Timeout
+    optimistic: true
+    unit_of_measurement: s
+    min_value: 15
+    max_value: 120
+    step: 1
+    entity_category: CONFIG
+    device_class: duration
+  - platform: template
     id: sntp_sync_interval_hours
-    name: SNTP Sync Interval (hours)
+    name: SNTP Sync Interval
     entity_category: CONFIG
     min_value: 0
     max_value: 48
@@ -1576,12 +1646,13 @@ number:
     restore_value: True
     optimistic: True
     initial_value: 1
+    unit_of_measurement: hour
     # lambda: |
-    #   return id(sntp_time).get_update_interval()/1000.f/60.f/60.f;
+    #   return id(sntp_component).get_update_interval()/1000.f/60.f/60.f;
     set_action: 
       then:
         - lambda: |
-            id(sntp_time).set_update_interval(1000.f /* ms/s */ * 60.f /* s/m */ *60.f /* m/h */ * x /* h */ );
+            id(sntp_component).set_update_interval(1000.f /* ms/s */ * 60.f /* s/m */ *60.f /* m/h */ * x /* h */ );
   - platform: template
     name: Display Intensity
     entity_category: CONFIG
@@ -1627,6 +1698,36 @@ number:
       then:
         - lambda: |
             id(my_rtttl).set_gain(x);
+
+select:
+  - platform: template
+    id: wireguard_select
+    name: Wireguard Enabled
+    entity_category: CONFIG
+    restore_value: True
+    optimistic: True
+    initial_option: AC
+    options: 
+      - "Never"
+      - "AC"
+      - "Always"
+    on_value: 
+      then:
+        - lambda: |
+            switch(i) {
+              case 0:
+                id(wireguard_component).disable();
+                break;
+              case 1:
+                if(id(ac_powered).state)
+                  id(wireguard_component).enable();
+                else
+                  id(wireguard_component).disable();
+                break;
+              case 2:
+                id(wireguard_component).enable();
+                break;
+            }
 
 lcd_menu_7segment:
   id: menu
@@ -1779,12 +1880,24 @@ lcd_menu_7segment:
       on_text: "12.34"
       off_text: "12.34"
       switch: display_flip
-    - type: switch
-      id: sound_menu_item
+    - type: menu
       text: ЗВУК
-      on_text: "On"
-      off_text: "OFF"
-      switch: ticking_switch
+      items:
+        - type: switch
+          text: TAйМ
+          on_text: "On"
+          off_text: "OFF"
+          switch: sound_timer_tick_switch
+        - type: switch
+          text: СЕКУ
+          on_text: "On"
+          off_text: "OFF"
+          switch: sound_tick_switch
+        - type: switch
+          text: Menu
+          on_text: "On"
+          off_text: "OFF"
+          switch: sound_menu_switch
     - type: switch
       switch: online_on_battery
       text: "СЕРВ"
@@ -1898,7 +2011,7 @@ display:
     }
 
     ESP_LOGD(TAG, "Showing current time");
-    const auto now = id(sntp_time).now();
+    const auto now = id(sntp_component).now();
     if(now.is_valid())
       it.strftime((id(frame) % 2) == 0 ? "%H.%M": "%H%M", now);
     else
