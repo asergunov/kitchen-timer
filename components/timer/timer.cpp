@@ -31,7 +31,7 @@ TimerTrigger::TimerTrigger(time::RealTimeClock *rtc)
 }
 
 void TimerTrigger::start(TimerTrigger::seconds_type seconds) {
-  ESP_LOGI(TAG, "Starting a trigger for %u seconds", seconds);
+  ESP_LOGI(TAG, "Starting a trigger for %lu seconds", seconds);
   start_seconds_ = seconds;
   const auto &now = rtc_->now();
   if (seconds <= 0) {

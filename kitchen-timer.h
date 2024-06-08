@@ -5,6 +5,7 @@
 #include "esp_pm.h"
 #include "esp_sntp.h"
 #include "esp_task_wdt.h"
+// #include "esp_clk_tree.h"
 
 #include <cstdint>
 #include <iterator>
@@ -21,6 +22,7 @@ RTC_DATA_ATTR float last_battery_percentage = NAN;
 namespace sntp {
 RTC_DATA_ATTR int64_t correction_us_total = 0;
 RTC_DATA_ATTR uint64_t correction_us_abs_total = 0;
+RTC_DATA_ATTR bool has_behind_us = false;
 RTC_DATA_ATTR int64_t behind_us = 0;
 RTC_DATA_ATTR int64_t up_time_us = 0;
 RTC_DATA_ATTR time_t sync_try_time = 0;
@@ -31,30 +33,34 @@ RTC_DATA_ATTR uint32_t sync_count = 0;
 bool force_sync_scheduled = false;
 
 void sntp_sync_time(struct timeval *tv) {
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  settimeofday(tv, NULL);
+
   sync_count++;
   force_sync_scheduled = false;
 
   if (first_sync_time == 0) {
     first_sync_time = tv->tv_sec;
   } else {
-    struct timeval now;
-    gettimeofday(&now, NULL);
     const auto correction_us_raw =
         (static_cast<int64_t>(tv->tv_sec) - static_cast<int64_t>(now.tv_sec)) *
             1000000 +
         static_cast<int64_t>(tv->tv_usec) - static_cast<int64_t>(now.tv_usec);
     const auto correction_us = correction_us_raw - behind_us;
     behind_us = correction_us_raw;
-    correction_us_abs_total += abs(correction_us);
-    if(correction_us_abs_total > static_cast<uint64_t>(1) << 63) {
-      correction_us_abs_total = abs(correction_us);
-      correction_us_total = 0;
+    if(has_behind_us) {
+      correction_us_abs_total += abs(correction_us);
+      if(correction_us_abs_total > static_cast<uint64_t>(1) << 63) {
+        correction_us_abs_total = abs(correction_us);
+        correction_us_total = 0;
+      }
+      correction_us_total += correction_us;
     }
-    correction_us_total += correction_us;
+    has_behind_us = true;
   }
 
   prev_sync = *tv;
-  settimeofday(tv, NULL);
   sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
   ::time(&sync_try_time);
 }
@@ -143,15 +149,15 @@ std::string timer_value_string(uint32_t seconds) {
   const auto minutes = seconds / 60;
   seconds %= 60;
   if (minutes > 99) {
-    std::snprintf(buffer, sizeof(buffer), "%3dh", hours);
+    std::snprintf(buffer, sizeof(buffer), "%3ldh", hours);
   } else if (hours > 9) {
-    std::snprintf(buffer, sizeof(buffer), "%2dh%d", hours, minutes);
+    std::snprintf(buffer, sizeof(buffer), "%2ldh%ld", hours, minutes);
   } else if (hours > 0) {
-    std::snprintf(buffer, sizeof(buffer), "%1dh%02d", hours, minutes);
+    std::snprintf(buffer, sizeof(buffer), "%1ldh%02ld", hours, minutes);
   } else if (minutes > 0) {
-    std::snprintf(buffer, sizeof(buffer), "%02d.%02d", minutes, seconds);
+    std::snprintf(buffer, sizeof(buffer), "%02ld.%02ld", minutes, seconds);
   } else {
-    std::snprintf(buffer, sizeof(buffer), "  .%02d", seconds);
+    std::snprintf(buffer, sizeof(buffer), "  .%02ld", seconds);
   }
   return {buffer};
 }
@@ -159,7 +165,7 @@ std::string timer_value_string(uint32_t seconds) {
 template <typename T, typename R = decltype((*std::declval<T>().begin())
                                                 ->get_seconds_remain())>
 R closest_timer(T &&timer_list) {
-  R smallest_timer = {};
+  R smallest_timer;
   for (const auto &timer : timer_list) {
     const auto &remain = timer->get_seconds_remain();
     if (!remain) {

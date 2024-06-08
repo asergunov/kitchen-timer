@@ -4,7 +4,9 @@ esp32:
   #   type: arduino
   framework:
     type: esp-idf
-    version: recommended
+    # platform_version: 6.5.0
+    # platform_version: 6.5.0 # 6.7.0 # need to bump it for latest version
+    # version: latest # recommended
     sdkconfig_options:
       # CONFIG_ESP_SYSTEM_PANIC_GDBSTUB: y
       CONFIG_PM_ENABLE: y
@@ -52,6 +54,10 @@ external_components:
     components:
       - sntp
     refresh: 0s
+  # - source: "github://asergunov/esphome_esphome@deep_sleep"
+  #   components:
+  #     - deep_sleep
+  #   refresh: 0s
   - source: ./components
     components:
       - daily_signal
@@ -103,7 +109,15 @@ esphome:
           id: display_intensity_number
           value: !lambda return 0.0f;
       - lambda: |
+          #if ESP_IDF_VERSION_MAJOR >= 5
+          esp_task_wdt_config_t wdtc;
+          wdtc.idle_core_mask = 0;
+          wdtc.timeout_ms = 1500;
+          wdtc.trigger_panic = false;
+          esp_task_wdt_reconfigure(&wdtc);
+          #else
           esp_task_wdt_init(1500, false);
+          #endif
           setenv("TZ", "${timezone}", 1);
           tzset();
       - lambda: |
@@ -341,13 +355,13 @@ wireguard:
   private_key: !secret kitchen_timer.wireguard.private_key
   peer_public_key: !secret kitchen_timer.wireguard.peer_public_key
   peer_preshared_key: !secret kitchen_timer.wireguard.peer_preshared_key
-  # peer_allowed_ips: 
-    # - 192.168.1.0/24
-    # - 192.168.2.0/24
-    # - 0.0.0.0/0
+  peer_allowed_ips: 
+    - 192.168.1.0/24
+    - 192.168.2.0/24
   peer_endpoint: !secret kitchen_timer.wireguard.peer_endpoint
   peer_port: !secret kitchen_timer.wireguard.peer_port
   peer_persistent_keepalive: !secret kitchen_timer.wireguard.peer_persistent_keepalive
+  reboot_timeout: 0s
 
 time:
   - platform: sntp
@@ -363,6 +377,15 @@ time:
       - 192.168.1.1
     on_time_sync:
       then:
+      - component.update: sntp_start_time_sensor
+      - component.update: sntp_sync_time_sensor
+      - component.update: sntp_sync_try_time_sensor
+      - component.update: sntp_correction_abs_total
+      - component.update: sntp_correction_total
+      - component.update: sntp_uptime
+      - component.update: sntp_sync_count
+      - component.update: sntp_avg_correction
+      - component.update: sntp_behind
       - logger.log: 
           level: INFO
           format: "SNTP Synchronized"
@@ -384,10 +407,7 @@ switch:
       then:
         lambda: |
           if(!esp_sntp_enabled()) return;
-          // esp_sntp_stop();
           sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
-          // esp_sntp_init();
-          sntp_restart();
   - platform: gpio
     id: power_saving
     restore_mode: ALWAYS_ON
@@ -703,7 +723,7 @@ script:
                       }
 
                       const auto to_sleep = clock_updater.useconds_to_update();
-                      ESP_LOGD(TAG, "To sleep calculates as %dus", to_sleep);
+                      ESP_LOGD(TAG, "To sleep calculates as %lldus", to_sleep);
                       if(to_sleep < 15*1000) {
                         ESP_LOGD(TAG, "To short to sleep");
                         return;
@@ -712,7 +732,7 @@ script:
                       ESP_LOGD(TAG, "Enabling timer wakeup");
                       auto result = esp_sleep_enable_timer_wakeup(to_sleep);
                       if(result != ESP_OK) {
-                        ESP_LOGE(TAG, "Can't setup wake timer for %dus, error: %d", to_sleep, result);
+                        ESP_LOGE(TAG, "Can't setup wake timer for %" PRId64 "us, error: %d", to_sleep, result);
                         return;
                       }
 
@@ -745,7 +765,15 @@ script:
                       // ESP_LOGD(TAG, "Starting light sleep");
                       esp_task_wdt_delete(nullptr);
                       result = esp_light_sleep_start();
+                      #if ESP_IDF_VERSION_MAJOR >= 5
+                      esp_task_wdt_config_t wdtc;
+                      wdtc.idle_core_mask = 0;
+                      wdtc.timeout_ms = 1500;
+                      wdtc.trigger_panic = false;
+                      esp_task_wdt_reconfigure(&wdtc);
+                      #else
                       esp_task_wdt_init(1500, false);
+                      #endif
 
                       for(const auto& gpio: wake_pins) {
                         const auto result = gpio_wakeup_disable(gpio);
@@ -908,6 +936,17 @@ script:
       - component.update: tm1637_display
 
 sensor:
+  # - platform: template
+  #   name: Freq RTC Slow
+  #   entity_category: DIAGNOSTIC
+  #   update_interval: 5s
+  #   device_class: duration
+  #   unit_of_measurement: Hz
+  #   lambda: |
+  #     uint32_t result;
+  #     if(ESP_OK != esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_RTC_SLOW, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &result))
+  #       return NAN;
+  #     return result;
   - platform: wireguard
     latest_handshake:
       name: 'WireGuard Latest Handshake'
@@ -916,14 +955,26 @@ sensor:
     entity_category: DIAGNOSTIC
     update_interval: 5s
     device_class: duration
+    unit_of_measurement: s
+    lambda: return 0.001f*sntp_get_sync_interval();
+  - platform: template
+    name: SNTP Behind
+    id: sntp_behind
+    update_interval: never
+    accuracy_decimals: 3
+    device_class: duration
+    entity_category: diagnostic
     unit_of_measurement: ms
-    lambda: return sntp_get_sync_interval();
+    lambda: |
+      return kitchen_timer::sntp::has_behind_us 
+        ? 0.001f /* us/ms */ * kitchen_timer::sntp::behind_us /* us */
+        : NAN;
   - platform: template
     id: sntp_start_time_sensor
     name: SNTP Start
     entity_category: DIAGNOSTIC
     device_class: timestamp
-    update_interval: 5s
+    update_interval: never
     lambda: |
       if(kitchen_timer::sntp::first_sync_time)
         return kitchen_timer::sntp::first_sync_time;
@@ -933,7 +984,7 @@ sensor:
     name: SNTP Sync
     entity_category: DIAGNOSTIC
     device_class: timestamp
-    update_interval: 5s
+    update_interval: never
     lambda: |
       if(kitchen_timer::sntp::prev_sync.tv_sec)
         return kitchen_timer::sntp::prev_sync.tv_sec;
@@ -943,7 +994,7 @@ sensor:
     name: SNTP Try Sync
     entity_category: DIAGNOSTIC
     device_class: timestamp
-    update_interval: 5s
+    update_interval: never
     lambda: |
       return kitchen_timer::sntp::sync_try_time;
   - platform: template
@@ -953,7 +1004,7 @@ sensor:
     accuracy_decimals: 3
     unit_of_measurement: ms
     state_class: total_increasing
-    update_interval: 5s
+    update_interval: never
     lambda: |
       return float(kitchen_timer::sntp::correction_us_abs_total)/1000.0f;
   - platform: template
@@ -963,7 +1014,7 @@ sensor:
     accuracy_decimals: 3
     unit_of_measurement: ms
     state_class: total
-    update_interval: 5s
+    update_interval: never
     lambda: |
       return float(kitchen_timer::sntp::correction_us_total)/1000.0f;
   - platform: template
@@ -974,7 +1025,7 @@ sensor:
     unit_of_measurement: s
     device_class: duration
     state_class: total_increasing
-    update_interval: 5s
+    update_interval: never
     lambda: |
       return kitchen_timer::sntp::first_sync_time == 0 
         ? NAN
@@ -985,7 +1036,7 @@ sensor:
     name: SNTP Sync calls
     accuracy_decimals: 0
     state_class: total_increasing
-    update_interval: 5s
+    update_interval: never
     lambda: |
       return kitchen_timer::sntp::sync_count;
   - platform: template
@@ -995,14 +1046,14 @@ sensor:
     accuracy_decimals: 2
     unit_of_measurement: s/day
     state_class: measurement
-    update_interval: 5s
+    update_interval: never
     lambda: |
       if(kitchen_timer::sntp::first_sync_time == 0)
         return NAN;
       const auto uptime = kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time;
       if(uptime == 0)
         return NAN;
-      return float(kitchen_timer::sntp::correction_us_total) / 1000.f / float(uptime) * 60.f * 60.f * 24.f;
+      return float(kitchen_timer::sntp::correction_us_total) /* us */ * 1e-6f /*s/us*/ / float(uptime) /* s */ * 60.f /* s/m */ * 60.f /* m/h */ * 24.f /* h/d */;
   - platform: debug
     free:
       name: "Heap Free"
