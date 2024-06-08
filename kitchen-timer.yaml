@@ -127,7 +127,7 @@ esphome:
       - globals.set:
           id: sleep_back
           value: !lambda |
-            return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+            return esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_GPIO;
       - lambda: |
           const auto& names = get_song_name_list(id(songs));
           for(auto&& select: {
@@ -141,10 +141,43 @@ esphome:
       #     App.set_loop_interval(100);
       - script.execute: update_display_loop
       - script.execute: sntp_updater_loop
-      - script.execute: play_battery_animation
+      - if:
+          condition:
+            - lambda: return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
+          then:
+            - script.execute: play_battery_animation
       - script.execute: sntp_update_interval_setup
+      - script.execute: encoder_clicks_loop
+  on_loop: 
+    then:
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: encoder_button
+              - lambda: |
+                  const auto delta = millis() - id(encoder_button_press_timestamp);
+                  return delta > 1000;
+          then:
+            - lambda: |
+                id(encoder_button_press_timestamp) = millis();
+            - if:
+                condition:
+                  - display_menu.is_active:
+                then:
+                  - display_menu.hide:
+                  - component.update: tm1637_display
+                else:
+                  - script.execute: deep_sleep_start   
 
 globals:
+  - id: encoder_clicks_to_play
+    type: uint8_t
+    initial_value: "0"
+  - id: encoder_button_press_timestamp
+    type: uint32_t
+    initial_value: "millis()"
+  - id: menu_bat_stat
+    type: uint8_t
   - id: sntp_ac_interval
     type: float
     initial_value: "60 * 60" # 1h interval
@@ -455,7 +488,7 @@ switch:
         - component.update: tm1637_display
   - platform: template
     id: sound_tick_switch
-    name: Sound Tick
+    name: Sound Second Tick
     optimistic: True
     entity_category: CONFIG
     restore_mode: RESTORE_DEFAULT_OFF
@@ -497,6 +530,37 @@ i2c:
     scl: $scl_pin
 
 script:
+  - id: encoder_clicks_loop
+    mode: single
+    then:
+      while:
+        condition: 
+          lambda: return true;
+        then:
+          - delay: 5ms              
+          - if:
+              condition: 
+                and:
+                  - lambda: return id(encoder_clicks_to_play) > 0;
+                  - not: 
+                      - rtttl.is_playing
+              then:
+                - lambda: |
+                    --id(encoder_clicks_to_play);
+                - if:
+                    condition:
+                      - script.is_running: deep_sleep_start
+                    then:
+                      - delay: 2ms
+                    else:
+                      - output.set_level:
+                          id: rtttl_out
+                          level: "100%"
+                      - delay: 1ms
+                      - output.set_level:
+                          id: rtttl_out
+                          level: "0%"
+                      - delay: 1ms
   - id: sntp_update_interval_setup
     mode: restart
     then: 
@@ -514,11 +578,13 @@ script:
           condition:
             - binary_sensor.is_off: encoder_button
       - lambda: |
+          if(id(play_signal).is_running()) {
+            ESP_LOGD(TAG, "Can't sleep. Signal is running");
+            return;
+          }
           id(tm1637_display).set_on(false);
           id(tm1637_display).display();
           id(tm1637_display).update();
-      - delay: 1ms
-      - lambda: |
           auto result = esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
           if(result != ESP_OK) {
             ESP_LOGE(TAG, "Can't disable timer wakeup sources, error: %d", result);
@@ -571,7 +637,11 @@ script:
           id(signal_stop_request) = false;
 
           if(id(signal_song_index) > id(songs).size()) {
-            ESP_LOGD(TAG, "Nothing to play");
+            if(id(sleep_back)) {
+              ESP_LOGI(TAG, "Was sleeping. Sleep again");
+              id(play_signal).stop();
+              id(deep_sleep_start).execute();
+            }
           } else {
             ESP_LOGI(TAG, "Starting to play song %d", id(signal_song_index));
             // schedule another song play
@@ -591,31 +661,12 @@ script:
                 condition:
                   - lambda:
                       return id(signal_stop_request);
-                timeout: 
-                  minutes: 5
+                timeout: !lambda return id(alarm_timeout).state * 1000 * 60;
             - lambda: |
                 ESP_LOGD(TAG, "Stop playing signal %d", id(signal_song_index));
                 id(signal_song_index) = static_cast<size_t>(-1);
                 id(signal_message).clear();
             - rtttl.stop:
-            - if:
-                condition: 
-                  - lambda: return id(sleep_back);
-                then:
-                  - script.execute: deep_sleep_start
-  - id: rotary_click
-    mode: queued
-    then:
-      - if:
-          condition: rtttl.is_playing
-          else:
-            - output.set_level:
-                id: rtttl_out
-                level: "100%"
-            - output.turn_on: rtttl_out
-            - delay: 1ms
-            - output.turn_off: rtttl_out
-            - delay: 1ms
   - id: tick_sound
     mode: single
     then:
@@ -631,15 +682,22 @@ script:
                   return i != timer_list.end();
           then:
             - if:
-                condition: rtttl.is_playing
+                condition:
+                  or:
+                    - script.is_running: deep_sleep_start
+                    - rtttl.is_playing:
+                then:
+                  - delay: 2ms
                 else:
                   - delay: 1ms
                   - output.set_level:
                       id: rtttl_out
                       level: "100%"
-                  - output.turn_on: rtttl_out
                   - delay: 1ms
-                  - output.turn_off: rtttl_out
+                  - output.set_level:
+                      id: rtttl_out
+                      level: "0%"
+                  
   - id: auto_menu_exit
     mode: restart
     then:
@@ -736,142 +794,136 @@ script:
                     - not:
                         - script.is_running: play_battery_animation
                 then:
-                  - if:
-                      condition: 
-                        - lambda: return id(sleep_back);
-                      then:
-                        - script.execute: deep_sleep_start
-                      else:
-                        - lambda: |
-                            ESP_LOGD(TAG, "Light sleep attempt");
-                            static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
-                              gpio_num_t($rotary_encoder_button_pin),
-                              gpio_num_t($charging_pin),
-                              };
+                  - lambda: |
+                      ESP_LOGD(TAG, "Light sleep attempt");
+                      static const auto wake_pins = std::initializer_list<gpio_num_t>{ 
+                        gpio_num_t($rotary_encoder_button_pin),
+                        gpio_num_t($charging_pin),
+                        };
 
-                            static const auto encoder_pins = std::initializer_list<gpio_num_t>{ 
-                              // gpio_num_t($rotary_encoder_a_pin), 
-                              // gpio_num_t($rotary_encoder_b_pin), 
-                            };
+                      static const auto encoder_pins = std::initializer_list<gpio_num_t>{ 
+                        // gpio_num_t($rotary_encoder_a_pin), 
+                        // gpio_num_t($rotary_encoder_b_pin), 
+                      };
 
-                            // InterruptLock lock;
+                      // InterruptLock lock;
 
-                            for(const auto& gpio: wake_pins) {
-                              if(0 == gpio_get_level(gpio)) {
-                                ESP_LOGD(TAG, "GPIO %d is low. Don't sleep", gpio);
-                                return;
-                              }
-                            }
+                      for(const auto& gpio: wake_pins) {
+                        if(0 == gpio_get_level(gpio)) {
+                          ESP_LOGD(TAG, "GPIO %d is low. Don't sleep", gpio);
+                          return;
+                        }
+                      }
 
-                            for(const auto& gpio: encoder_pins) {
-                              if(0 == gpio_get_level(gpio)) {
-                                ESP_LOGD(TAG, "Encoder GPIO %d is low. Don't sleep", gpio);
-                                return;
-                              }
-                            }
+                      for(const auto& gpio: encoder_pins) {
+                        if(0 == gpio_get_level(gpio)) {
+                          ESP_LOGD(TAG, "Encoder GPIO %d is low. Don't sleep", gpio);
+                          return;
+                        }
+                      }
 
-                            const auto to_sleep = clock_updater.useconds_to_update();
-                            ESP_LOGD(TAG, "To sleep calculates as %lldus", to_sleep);
-                            if(to_sleep < 15*1000) {
-                              ESP_LOGD(TAG, "To short to sleep");
-                              return;
-                            }
+                      const auto to_sleep = clock_updater.useconds_to_update();
+                      ESP_LOGD(TAG, "To sleep calculates as %lldus", to_sleep);
+                      if(to_sleep < 15*1000) {
+                        ESP_LOGD(TAG, "To short to sleep");
+                        return;
+                      }
 
-                            ESP_LOGD(TAG, "Enabling timer wakeup");
-                            auto result = esp_sleep_enable_timer_wakeup(to_sleep);
-                            if(result != ESP_OK) {
-                              ESP_LOGE(TAG, "Can't setup wake timer for %" PRId64 "us, error: %d", to_sleep, result);
-                              return;
-                            }
+                      ESP_LOGD(TAG, "Enabling timer wakeup");
+                      auto result = esp_sleep_enable_timer_wakeup(to_sleep);
+                      if(result != ESP_OK) {
+                        ESP_LOGE(TAG, "Can't setup wake timer for %" PRId64 "us, error: %d", to_sleep, result);
+                        return;
+                      }
 
-                            ESP_LOGD(TAG, "Enabling GPIO wakeup");
-                            for(const auto& gpio: wake_pins) {
-                              result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
-                              if(ESP_OK != result) {
-                                ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
-                              }
-                            }
+                      ESP_LOGD(TAG, "Enabling GPIO wakeup");
+                      for(const auto& gpio: wake_pins) {
+                        result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
+                        }
+                      }
 
-                            for(const auto& gpio: encoder_pins) {
-                              result = gpio_intr_disable(gpio);
-                              if(ESP_OK != result) {
-                                ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
-                              }
-                              result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
-                              if(ESP_OK != result) {
-                                ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
-                              }
-                            }
+                      for(const auto& gpio: encoder_pins) {
+                        result = gpio_intr_disable(gpio);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
+                        }
+                        result = gpio_wakeup_enable(gpio, GPIO_INTR_LOW_LEVEL);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't enable gpio wake source %d, error: %d", gpio, result);
+                        }
+                      }
 
-                            result = esp_sleep_enable_gpio_wakeup();
-                            if(ESP_OK != result) {
-                              ESP_LOGE(TAG, "Can't enable gpio wakeup, error %d", result);
-                            }
-                            // App.run_safe_shutdown_hooks();
-                            // adc_power_off();
-                            // id(tm1637_display).stop_poller();
-                            // ESP_LOGD(TAG, "Starting light sleep");
-                            esp_task_wdt_delete(nullptr);
-                            result = esp_light_sleep_start();
-                            #if ESP_IDF_VERSION_MAJOR >= 5
-                            esp_task_wdt_config_t wdtc;
-                            wdtc.idle_core_mask = 0;
-                            wdtc.timeout_ms = 1500;
-                            wdtc.trigger_panic = false;
-                            esp_task_wdt_reconfigure(&wdtc);
-                            #else
-                            esp_task_wdt_init(1500, false);
-                            #endif
+                      result = esp_sleep_enable_gpio_wakeup();
+                      if(ESP_OK != result) {
+                        ESP_LOGE(TAG, "Can't enable gpio wakeup, error %d", result);
+                      }
+                      // App.run_safe_shutdown_hooks();
+                      // adc_power_off();
+                      // id(tm1637_display).stop_poller();
+                      // ESP_LOGD(TAG, "Starting light sleep");
+                      esp_task_wdt_delete(nullptr);
+                      result = esp_light_sleep_start();
+                      #if ESP_IDF_VERSION_MAJOR >= 5
+                      esp_task_wdt_config_t wdtc;
+                      wdtc.idle_core_mask = 0;
+                      wdtc.timeout_ms = 1500;
+                      wdtc.trigger_panic = false;
+                      esp_task_wdt_reconfigure(&wdtc);
+                      #else
+                      esp_task_wdt_init(1500, false);
+                      #endif
 
-                            for(const auto& gpio: wake_pins) {
-                              const auto result = gpio_wakeup_disable(gpio);
-                              if(ESP_OK != result) {
-                                ESP_LOGE(TAG, "Can't disable gpio wake source %d, error: %d", gpio, result);
-                              }
-                            }
+                      for(const auto& gpio: wake_pins) {
+                        const auto result = gpio_wakeup_disable(gpio);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't disable gpio wake source %d, error: %d", gpio, result);
+                        }
+                      }
 
-                            ESP_LOGD(TAG, "Enabling GPIO interrupts");
-                            for(const auto& gpio: encoder_pins) {
-                              const auto result = gpio_intr_enable(gpio);
-                              if(ESP_OK != result) {
-                                ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
-                              }
-                            }
+                      ESP_LOGD(TAG, "Enabling GPIO interrupts");
+                      for(const auto& gpio: encoder_pins) {
+                        const auto result = gpio_intr_enable(gpio);
+                        if(ESP_OK != result) {
+                          ESP_LOGE(TAG, "Can't disable gpio interrupt %d, error: %d", gpio, result);
+                        }
+                      }
 
-                            switch(result) {
-                              case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
-                                ESP_LOGE(TAG, "Can't start sleep: duration to short");
-                                break;
-                              case ESP_ERR_SLEEP_REJECT:
-                                ESP_LOGE(TAG, "Can't start sleep: sleep reject");
-                                break;
-                              case ESP_OK:
-                                ESP_LOGD(TAG, "Woke up");
-                                switch(esp_sleep_get_wakeup_cause()) {
-                                  case ESP_SLEEP_WAKEUP_GPIO:
-                                    ESP_LOGI(TAG, "Wake cause is GPIO");
-                                    id(encoder_button)->loop();
-                                    ESP_LOGI(TAG, "encoder_button: %d", int(id(encoder_button).state));
-                                    id(charging_sensor)->loop();
-                                    ESP_LOGI(TAG, "charging_sensor: %d", int(id(charging_sensor).state));
-                                    id(fully_charged)->loop();
-                                    ESP_LOGI(TAG, "fully_charged: %d", int(id(fully_charged).state));
-                                    id(ac_powered)->loop();
-                                    ESP_LOGI(TAG, "ac_powered: %d", int(id(ac_powered).state));
-                                    break;
-                                  case ESP_SLEEP_WAKEUP_TIMER:
-                                    ESP_LOGD(TAG, "Wake cause is a Timer");
-                                    break;
-                                  default:
-                                    ESP_LOGW(TAG, "Unexpected wake cause %d", esp_sleep_get_wakeup_cause());
-                                    break;
-                                }
-                                break;
-                              default:
-                                ESP_LOGE(TAG, "Can't start sleep: error %d", result);
-                                break;
-                            }
-                            // id(tm1637_display).start_poller();
+                      switch(result) {
+                        case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
+                          ESP_LOGE(TAG, "Can't start sleep: duration to short");
+                          break;
+                        case ESP_ERR_SLEEP_REJECT:
+                          ESP_LOGE(TAG, "Can't start sleep: sleep reject");
+                          break;
+                        case ESP_OK:
+                          ESP_LOGD(TAG, "Woke up");
+                          switch(esp_sleep_get_wakeup_cause()) {
+                            case ESP_SLEEP_WAKEUP_GPIO:
+                              ESP_LOGI(TAG, "Wake cause is GPIO");
+                              id(encoder_button)->loop();
+                              ESP_LOGI(TAG, "encoder_button: %d", int(id(encoder_button).state));
+                              id(charging_sensor)->loop();
+                              ESP_LOGI(TAG, "charging_sensor: %d", int(id(charging_sensor).state));
+                              id(fully_charged)->loop();
+                              ESP_LOGI(TAG, "fully_charged: %d", int(id(fully_charged).state));
+                              id(ac_powered)->loop();
+                              ESP_LOGI(TAG, "ac_powered: %d", int(id(ac_powered).state));
+                              break;
+                            case ESP_SLEEP_WAKEUP_TIMER:
+                              ESP_LOGD(TAG, "Wake cause is a Timer");
+                              break;
+                            default:
+                              ESP_LOGW(TAG, "Unexpected wake cause %d", esp_sleep_get_wakeup_cause());
+                              break;
+                          }
+                          break;
+                        default:
+                          ESP_LOGE(TAG, "Can't start sleep: error %d", result);
+                          break;
+                      }
+                      // id(tm1637_display).start_poller();
                   - component.update: light_sensor
                   - lambda: |
                       // It takes more then one loop to update sensor
@@ -1134,9 +1186,6 @@ sensor:
         input: True
         pullup: True
     on_anticlockwise:
-      - globals.set: 
-          id: sleep_back
-          value: "false"  
       - if: 
           condition:
             - script.is_running: play_signal
@@ -1153,10 +1202,8 @@ sensor:
                   - display_menu.down:
                 else:
                   - display_menu.show_main:
+                  - display_menu.down:
     on_clockwise:
-      - globals.set: 
-          id: sleep_back
-          value: "false"
       - if: 
           condition:
             - script.is_running: play_signal
@@ -1169,13 +1216,14 @@ sensor:
                   - display_menu.up:
                 else:
                   - display_menu.show_main:
+                  - display_menu.down:
     on_value:
-      then:
-        if:
-          condition:
-            - switch.is_on: sound_menu_switch
-          then:
-            - script.execute: rotary_click
+      - globals.set: 
+          id: sleep_back
+          value: "false"
+      - lambda: |
+          if(id(encoder_clicks_to_play) < 32)
+            id(encoder_clicks_to_play)++;
 
   - platform: veml7700
     id: light_sensor
@@ -1308,7 +1356,7 @@ sensor:
     internal: True
     lambda: |
       const auto& voltage = id(charging_voltage).state;
-      const auto& current = id(charging_current_fast).state;
+      const auto& current = id(charging_current).state;
       auto by_voltage1=[&]{
         return (((1.012798E+00f * voltage - 1.428660E+01f) * voltage + 7.558094E+01f) * voltage - 1.776824E+02f) * voltage + 1.565834E+02f;
       };
@@ -1389,7 +1437,7 @@ sensor:
         input: true
     device_class: current
     entity_category: DIAGNOSTIC
-    id: charging_current_fast
+    id: charging_current
     attenuation: auto
     unit_of_measurement: mA
     update_interval: 5s
@@ -1417,6 +1465,10 @@ binary_sensor:
       mode: 
         input: True
         pullup: True
+    on_press:
+      - lambda: |
+          id(encoder_button_press_timestamp) = millis();
+      - component.update: tm1637_display  
     on_click:
       - globals.set: 
           id: sleep_back
@@ -1437,17 +1489,7 @@ binary_sensor:
                   - display_menu.enter:
                 else:
                   - display_menu.show_main:
-    on_multi_click:
-      - timing:
-          - ON for at least 1s
-        then:
-          if:
-            condition:
-              - display_menu.is_active:
-            then:
-              - display_menu.hide:
-            else:
-              - script.execute: deep_sleep_start   
+    
   - platform: gpio
     name: Power Charging
     id: charging_sensor
@@ -1594,6 +1636,16 @@ button:
         - component.update: sntp_component
 number:
   - platform: template
+    id: alarm_timeout
+    name: Alarm Timeout
+    min_value: 1
+    max_value: 15
+    step: 1
+    unit_of_measurement: min
+    optimistic: True
+    restore_value: True
+    initial_value: 5
+  - platform: template
     name: SNTP AC Sync Interval
     lambda: return id(sntp_ac_interval)/60.f;
     unit_of_measurement: min
@@ -1734,8 +1786,8 @@ lcd_menu_7segment:
   mode: rotary
   active: false
   items:
-    - type: menu
-      text: "ТАйМ"
+    - text: "ТАйМ"
+      type: menu
       items:
         - type: custom
           text: "СТАР"
@@ -1805,8 +1857,8 @@ lcd_menu_7segment:
                 } else if(id(menu_recent_timer) > 0) {
                   id(menu_recent_timer)--;
                 }
-        - type: custom
-          text: "СТОП"
+        - text: "СТОП"
+          type: custom          
           value_lambda: |
             if(id(menu_current_running_timer_component) == nullptr) return "$menu_text_back";
             const auto& seconds_remain = id(frame)%2 == 0 
@@ -1855,7 +1907,6 @@ lcd_menu_7segment:
               if(id(menu_current_running_timer_component)) {
                 id(menu_current_running_timer_component)->start(0);
               }
-
         - type: back
           text: $menu_text_back
     - type: number
@@ -1868,20 +1919,20 @@ lcd_menu_7segment:
         if(x >= 0) {
           result.clear();
           for(int i = 0; i < 4; ++i) {
-            result.push_back('0'+x);
+            result.push_back('0'+x+1);
           }
         }
         return result;
       number: display_intensity
-    - type: switch
+    - text: "ПОВО"
+      type: switch
       id: turn_menu_item
-      text: "ПОВО"
       immediate_edit: false
       on_text: "12.34"
       off_text: "12.34"
       switch: display_flip
-    - type: menu
-      text: ЗВУК
+    - text: ЗВУК
+      type: menu
       items:
         - type: switch
           text: TAйМ
@@ -1894,17 +1945,79 @@ lcd_menu_7segment:
           off_text: "OFF"
           switch: sound_tick_switch
         - type: switch
-          text: Menu
+          text: mEnu
           on_text: "On"
           off_text: "OFF"
           switch: sound_menu_switch
-    - type: switch
-      switch: online_on_battery
-      text: "СЕРВ"
-      on_text: "ВСЕГ"
-      off_text: "СЕТЬ"
-    - type: command
-      text: $menu_text_back
+        - type: back
+          text: $menu_text_back
+    - text: БАТА
+      type: menu
+      items:
+        - type: custom
+          text: СТАТ
+          on_enter:
+            - globals.set:
+                id: menu_bat_stat
+                value: "0"
+          on_next:
+            - lambda: id(menu_bat_stat)++;
+          on_prev:
+            - lambda: id(menu_bat_stat)--;
+          value_lambda: |
+            char buff[6] = "";
+            auto index = id(menu_bat_stat)%4;
+            switch(index) {
+              case 0:
+                snprintf(buff, 6, "Б%3.0f", kitchen_timer::last_battery_percentage);
+                break;
+              case 1:
+                snprintf(buff, 6, "%0.3f", isnan(id(battery_voltage).state)
+                  ? id(charging_voltage).state 
+                  : id(battery_voltage).state);
+                std::replace(std::begin(buff), std::end(buff), '.', 'U');
+                break;
+              case 2:
+                if(!isnan(id(charging_current).state)) {
+                  snprintf(buff, 6, "%.3f", id(charging_current).state*0.001);
+                  if(buff[0] == '0') {
+                    std::copy(std::begin(buff)+1, std::end(buff), std::begin(buff));
+                  }
+                } else {
+                  snprintf(buff, 6, "  0.");
+                }
+                std::replace(std::begin(buff), std::end(buff), '.', 'A');
+                break;
+              case 3:
+                return "$menu_text_back";
+            }
+            return {buff};
+
+        - text: "СЕРВ"
+          type: switch
+          switch: online_on_battery
+          on_text: "ВСЕГ"
+          off_text: "СЕТЬ"
+        - text: WrGr
+          type: select
+          select: wireguard_select
+          value_lambda: |
+            const auto& index = id(wireguard_select).active_index();
+            if(index.has_value()) {
+              switch(index.value()) {
+                case 0:
+                  return "ЗАПР";
+                case 1:
+                  return "СЕТЬ";
+                case 2:
+                  return "ВСЕГ";
+              }
+            }
+            return "----";
+        - type: back
+          text: $menu_text_back
+    - text: $menu_text_back
+      type: command
       on_value:
         then:
           - display_menu.hide:
@@ -1925,12 +2038,16 @@ display:
       return;
     }
 
-    if(id(play_battery_animation).is_running() || id(deep_sleep_start).is_running()) {
+    auto display_battery = [&it]{
       if(isnan(kitchen_timer::last_battery_percentage)) {
-        it.printf("БАТА");
+        it.printf("Б --");
         return;
       }
       it.printf("Б%3.0f", kitchen_timer::last_battery_percentage);
+    };
+
+    if(id(play_battery_animation).is_running()) {
+      display_battery();
       return;
 
       // char buff[5] = {0,0,0,0,0};
@@ -1957,6 +2074,14 @@ display:
       // it.set_on(true);
       ESP_LOGD(TAG, "Drawing menu");
       id(menu).draw();
+      return;
+    }
+
+    if(id(encoder_button).state) {
+      if(id(deep_sleep_start).is_running())
+        it.print("   ");
+      else
+        display_battery();
       return;
     }
 
