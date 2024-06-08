@@ -1,5 +1,5 @@
-# cSpell:words bootloader
-# cSpell:ignore GDBSTUB CRYS 
+# cSpell:words bootloader datapoints useconds veml
+# cSpell:ignore GDBSTUB CRYS LWIP НАЗА wdtc setenv tzset nullptr IMMED isnan getserver getservername ledc preshared keepalive rbegin ПОВО СЕРВ ВСЕГ spect
 esp32:
   board: esp32-c3-devkitm-1
   # framework:
@@ -676,15 +676,11 @@ script:
                   - lambda: |
                       ++id(frame);
                       clock_updater.mark_updated();
-                      // id(tm1637_display).display();
                   - logger.log:
                       level: DEBUG
                       format: Frame is %d.
                       args:
                         - id(frame)
-                  - component.update: light_sensor
-                  - component.update: display_intensity
-                  - component.update: display_intensity_number
                   - component.update: tm1637_display
                   - wait_until:
                       condition:
@@ -846,6 +842,11 @@ script:
                                 break;
                             }
                             // id(tm1637_display).start_poller();
+                  - component.update: light_sensor
+                  - lambda: |
+                      // It takes more then one loop to update sensor
+                      for(int i = 0; i<5; ++i)
+                        id(light_sensor).loop();
                 else:
                   - delay: !lambda "return clock_updater.useconds_to_update()/1000.;"
   - id: play_battery_animation
@@ -1145,11 +1146,17 @@ sensor:
     id: light_sensor
     address: 0x10
     update_interval: 0.5s
+    auto_mode: False
     # short variant of sensor definition:
     ambient_light:
       id: ambient_light_sensor_fast
       name: Light Ambient Fast
       internal: True
+    ambient_light_counts: 
+      name: Light Ambient Counts
+      entity_category: diagnostic
+      filters:
+        - throttle: 5s
 
     infrared:
       name: Light Infrared
@@ -1157,7 +1164,22 @@ sensor:
       filters:
         - throttle: 5s
     full_spectrum:
-      name: Light Full spectrum
+      name: Light Full Spectrum
+      entity_category: diagnostic
+      filters:
+        - throttle: 5s
+    full_spectrum_counts: 
+      name: Light Full Spectrum Counts
+      entity_category: diagnostic
+      filters:
+        - throttle: 5s
+    actual_integration_time:
+      name: Light Integration Time
+      entity_category: diagnostic
+      filters:
+        - throttle: 5s
+    actual_gain:
+      name: Light Gain
       entity_category: diagnostic
       filters:
         - throttle: 5s
@@ -1187,7 +1209,6 @@ sensor:
       - clamp:
           max_value: 7
           min_value: 0
-      - delta: 0.1% # to prevent publishing non-changed values
     on_value:
       then:
         - if:
