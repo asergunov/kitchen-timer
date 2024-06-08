@@ -120,6 +120,10 @@ esphome:
           #endif
           setenv("TZ", "${timezone}", 1);
           tzset();
+      - globals.set:
+          id: sleep_back
+          value: !lambda |
+            return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
       - lambda: |
           const auto& names = get_song_name_list(id(songs));
           for(auto&& select: {
@@ -136,6 +140,9 @@ esphome:
       - script.execute: play_battery_animation
 
 globals:
+  - id: sleep_back
+    type: bool
+    initial_value: "false"
   - id: ota_progress
     type: float
     initial_value: "NAN"
@@ -569,6 +576,11 @@ script:
                 id(signal_song_index) = static_cast<size_t>(-1);
                 id(signal_message).clear();
             - rtttl.stop:
+            - if:
+                condition: 
+                  - lambda: return id(sleep_back);
+                then:
+                  - script.execute: deep_sleep_start
   - id: rotary_click
     mode: queued
     then:
@@ -1080,6 +1092,9 @@ sensor:
         input: True
         pullup: True
     on_anticlockwise:
+      - globals.set: 
+          id: sleep_back
+          value: "false"  
       - if: 
           condition:
             - script.is_running: play_signal
@@ -1097,18 +1112,21 @@ sensor:
                 else:
                   - display_menu.show_main:
     on_clockwise:
-      if: 
-        condition:
-          - script.is_running: play_signal
-        else:
-          - script.execute: auto_menu_exit
-          - if:
-              condition:
-                display_menu.is_active:
-              then:
-                - display_menu.up:
-              else:
-                - display_menu.show_main:
+      - globals.set: 
+          id: sleep_back
+          value: "false"
+      - if: 
+          condition:
+            - script.is_running: play_signal
+          else:
+            - script.execute: auto_menu_exit
+            - if:
+                condition:
+                  display_menu.is_active:
+                then:
+                  - display_menu.up:
+                else:
+                  - display_menu.show_main:
     on_value:
       then:
         - script.execute: rotary_click
@@ -1334,22 +1352,25 @@ binary_sensor:
         input: True
         pullup: True
     on_click:
-      if: 
-        condition:
-          - script.is_running: play_signal
-        then:
-          - globals.set: 
-              id: signal_stop_request
-              value: !lambda return true;
-        else:
-          - script.execute: auto_menu_exit
-          - if:
-              condition:
-                display_menu.is_active:
-              then:
-                - display_menu.enter:
-              else:
-                - display_menu.show_main:
+      - globals.set: 
+          id: sleep_back
+          value: "false"
+      - if: 
+          condition:
+            - script.is_running: play_signal
+          then:
+            - globals.set: 
+                id: signal_stop_request
+                value: !lambda return true;
+          else:
+            - script.execute: auto_menu_exit
+            - if:
+                condition:
+                  display_menu.is_active:
+                then:
+                  - display_menu.enter:
+                else:
+                  - display_menu.show_main:
     on_multi_click:
       - timing:
           - ON for at least 1s
@@ -1407,21 +1428,26 @@ binary_sensor:
           return;
         }
     on_release: 
-      lambda: |
-        esp_pm_config_esp32c3_t config;
-        auto result = esp_pm_get_configuration(&config);
-        if(ESP_OK != result) {
-          ESP_LOGE(TAG, "Can't get pm config, error %d", result);
-          return;
-        }
-        config.max_freq_mhz = 80;
-        config.min_freq_mhz = 80;
-        config.light_sleep_enable = false;
-        result = esp_pm_configure(&config);
-        if(ESP_OK != result) {
-          ESP_LOGE(TAG, "Can't set pm config, error %d", result);
-          return;
-        } 
+      - lambda: |
+          esp_pm_config_esp32c3_t config;
+          auto result = esp_pm_get_configuration(&config);
+          if(ESP_OK != result) {
+            ESP_LOGE(TAG, "Can't get pm config, error %d", result);
+            return;
+          }
+          config.max_freq_mhz = 80;
+          config.min_freq_mhz = 80;
+          config.light_sleep_enable = false;
+          result = esp_pm_configure(&config);
+          if(ESP_OK != result) {
+            ESP_LOGE(TAG, "Can't set pm config, error %d", result);
+            return;
+          } 
+      - if:
+          condition: 
+            - lambda: return id(sleep_back);
+          then:
+            - script.execute: deep_sleep_start
         
         
   - platform: wireguard
