@@ -120,13 +120,13 @@ script:
             - delay: 1s
 
 sensor:
-  # - platform: template
-  #   name: SNTP Sync interval
-  #   entity_category: DIAGNOSTIC
-  #   update_interval: 5s
-  #   device_class: duration
-  #   unit_of_measurement: s
-  #   lambda: return 0.001f*sntp_get_sync_interval();
+  - platform: template
+    name: SNTP Sync interval
+    entity_category: DIAGNOSTIC
+    update_interval: 5s
+    device_class: duration
+    unit_of_measurement: s
+    lambda: return 0.001f*sntp_get_sync_interval();
   - platform: template
     name: SNTP Behind
     id: sntp_behind
@@ -338,22 +338,22 @@ number:
     step: 1
     entity_category: CONFIG
     device_class: duration
-  - platform: template
-    id: sntp_sync_interval_hours
-    name: SNTP Sync Interval
-    mode: box
-    entity_category: CONFIG
-    min_value: 0
-    max_value: 48
-    step: 0.01
-    device_class: duration
-    restore_value: True
-    optimistic: True
-    initial_value: 1
-    unit_of_measurement: hour
-    # lambda: |
-    #   return id(sntp_component).get_update_interval()/1000.f/60.f/60.f;
-    set_action: 
-      then:
-        - lambda: |
-            id(sntp_component).set_update_interval(1000.f /* ms/s */ * 60.f /* s/m */ *60.f /* m/h */ * x /* h */ );
+  # - platform: template
+  #   id: sntp_sync_interval_hours
+  #   name: SNTP Sync Interval
+  #   mode: box
+  #   entity_category: CONFIG
+  #   min_value: 0
+  #   max_value: 48
+  #   step: 0.01
+  #   device_class: duration
+  #   restore_value: True
+  #   optimistic: True
+  #   initial_value: 1
+  #   unit_of_measurement: hour
+  #   # lambda: |
+  #   #   return id(sntp_component).get_update_interval()/1000.f/60.f/60.f;
+  #   set_action: 
+  #     then:
+  #       - lambda: |
+  #           id(sntp_component).set_update_interval(1000.f /* ms/s */ * 60.f /* s/m */ *60.f /* m/h */ * x /* h */ );

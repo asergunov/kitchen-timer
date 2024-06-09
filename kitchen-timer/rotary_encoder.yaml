@@ -32,11 +32,6 @@ esphome:
                   - script.execute: deep_sleep_start   
 
 sensor:
-  - platform: template
-    name: Debug Encoder clicks to play
-    lambda: return id(encoder_clicks_to_play);
-    update_interval: 5s
-    entity_category: diagnostic
   - platform: rotary_encoder
     id: encoder
     name: Encoder Position
