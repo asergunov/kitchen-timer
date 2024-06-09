@@ -1,0 +1,79 @@
+text:
+  - platform: template
+    id: timer_${index}_time
+    name: Timer ${index}
+    mode: text
+    min_length: 0
+    max_length: 8
+    update_interval: 1s
+    lambda: |
+      auto sec_opt = id(timer_${index}_timer)->get_seconds_remain();
+      if(!sec_opt) return std::string{};
+      auto sec = *sec_opt;
+      auto min = sec /60; 
+      sec = sec % 60;
+      auto hour = min/60;
+      min %= 60;
+      char buffer[16];
+      snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", int(hour), int(min), int(sec));
+      return std::string{buffer};
+    set_action:
+      - then:
+          - lambda: |
+              const auto& timer = id(timer_${index}_timer);
+              if(!timer->get_seconds_remain()) {
+                timer->start(x);
+                const auto& seconds = timer->get_seconds_remain();
+                if(seconds)
+                  add_to_recent_timers(id(recent_timers), *seconds);
+              }
+
+select:
+  - platform: template
+    id: timer_${index}_sound
+    name: Timer ${index} Sound
+    optimistic: True
+    restore_value: True
+    options: [""]
+
+button:
+  - platform: template
+    name: Timer ${index} Cancel
+    on_press:
+      then:
+        lambda: |
+          id(timer_${index}_timer)->start(0);
+
+  - platform: template
+    id: timer_${index}_test_button
+    name: Timer ${index} Test
+    on_press:
+      then:
+        - if:
+            condition:
+              not:
+                - script.is_running: play_signal
+            then:
+              - if:
+                  condition: rtttl.is_playing
+                  then:
+                    - rtttl.stop:
+                  else:
+                    - rtttl.stop:
+                    - rtttl.play: !lambda return song_by_index( id(timer_${index}_sound).active_index() );
+
+time:
+  - platform: timer
+    id: timer_${index}_timer
+    on_time:
+      then:
+        - lambda: |
+            // workaround on strftime is non const
+            const auto& song_index = id(timer_${index}_sound).active_index();
+            alarms::push(
+              song_index ? *song_index : 0, {
+                timer_value_string(id(timer_${index}_timer).get_start_seconds()),
+                "",
+                timer_value_string(0),
+                "",
+              });

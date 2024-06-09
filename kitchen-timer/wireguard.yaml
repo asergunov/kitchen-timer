@@ -1,0 +1,100 @@
+wireguard:
+  id: wireguard_component
+  address: !secret kitchen_timer.wireguard.address
+  netmask: !secret kitchen_timer.wireguard.netmask
+  private_key: !secret kitchen_timer.wireguard.private_key
+  peer_public_key: !secret kitchen_timer.wireguard.peer_public_key
+  peer_preshared_key: !secret kitchen_timer.wireguard.peer_preshared_key
+  peer_allowed_ips: 
+    - 192.168.1.0/24
+    - 192.168.2.0/24
+  peer_endpoint: !secret kitchen_timer.wireguard.peer_endpoint
+  peer_port: !secret kitchen_timer.wireguard.peer_port
+  peer_persistent_keepalive: !secret kitchen_timer.wireguard.peer_persistent_keepalive
+  reboot_timeout: 0s
+
+sensor:
+  - platform: wireguard
+    latest_handshake:
+      name: 'WireGuard Latest Handshake'
+
+binary_sensor:
+  - platform: wireguard
+    status:
+      entity_category: DIAGNOSTIC
+      name: 'WireGuard Status'
+  - id: !extend ac_powered
+    on_state: 
+      then:
+        - script.execute: wireguard_settings_update
+
+
+text_sensor:
+  - platform: wireguard
+    address:
+      entity_category: DIAGNOSTIC
+      name: 'WireGuard Address'
+
+select:
+  - platform: template
+    id: wireguard_select
+    name: Wireguard Enabled
+    entity_category: CONFIG
+    restore_value: True
+    optimistic: True
+    initial_option: AC
+    options: 
+      - "Never"
+      - "AC"
+      - "Always"
+    on_value: 
+      then:
+        - lambda: |
+            switch(i) {
+              case 0:
+                id(wireguard_component).disable();
+                break;
+              case 1:
+                if(id(ac_powered).state)
+                  id(wireguard_component).enable();
+                else
+                  id(wireguard_component).disable();
+                break;
+              case 2:
+                id(wireguard_component).enable();
+                break;
+            }
+
+script:
+  - id: wireguard_settings_update
+    mode: single
+    then:
+      - lambda: |
+          auto index = id(wireguard_select).active_index();
+          if(!index.has_value() || index.value() != 1)
+            return;
+          if(id(ac_powered).state)
+            id(wireguard_component).enable();
+          else
+            id(wireguard_component).disable();
+
+lcd_menu_7segment:
+  items:
+    - id: !extend menu_item_battery_menu
+      items:
+        - text: WrGr
+          type: select
+          select: wireguard_select
+          value_lambda: |
+            const auto& index = id(wireguard_select).active_index();
+            if(index.has_value()) {
+              switch(index.value()) {
+                case 0:
+                  return "ЗАПР";
+                case 1:
+                  return "СЕТЬ";
+                case 2:
+                  return "ВСЕГ";
+              }
+            }
+            return "----";

@@ -1,0 +1,23 @@
+
+debug:
+  update_interval: 10s
+  
+text_sensor:
+  - platform: debug
+    device:
+      name: "Debug Device Info"
+    reset_reason:
+      name: "Debug Reset Reason"
+
+sensor:
+  - platform: debug
+    free:
+      name: "Debug Free Heap"
+    # fragmentation:
+    #   name: "Debug Heap Fragmentation"
+    block:
+      name: "Debug Heap Max Block"
+    loop_time:
+      name: "Debug Loop Time"
+      # psram:
+      #   name: "Debug Free PSRAM"

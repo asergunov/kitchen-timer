@@ -105,6 +105,9 @@ esphome:
     board_build.flash_mode: dio
     # extra_scripts:
     #   - pre:../../../extra_script.py
+  project: 
+    name: "asergunov.kitchen-timer"
+    version: "0.0.1"
   on_boot:
     priority: 1000
     then:
@@ -276,9 +279,6 @@ globals:
         "mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6",
       }
 
-debug:
-  update_interval: 10s
-
 api:
   encryption:
     key: !secret kitchen_timer.api.encryption
@@ -307,68 +307,74 @@ ota:
       - component.update: tm1637_display          
 
 packages:
+  debug: !include ./kitchen-timer/debug.yaml 
+  wifi: !include ./kitchen-timer/wifi.yaml 
+  menu: !include ./kitchen-timer/menu.yaml
+  power: !include ./kitchen-timer/power.yaml
+  wireguard: !include ./kitchen-timer/wireguard.yaml
+  # web_server: !include ./kitchen-timer/web_server.yaml
   signal1: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 1
   signal2: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 2
   signal3: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 3
   signal4: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 4
   signal5: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 5
   signal6: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 6
   signal7: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 7
   signal8: !include
-    file: .kitchen-timer_signal.yaml
+    file: ./kitchen-timer/signal.yaml
     vars:
       index: 8
   timer1: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 1
   timer2: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 2
   timer3: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 3
   timer4: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 4
   timer5: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 5
   timer6: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 6
   timer7: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 7
   timer8: !include
-    file: .kitchen-timer_timer.yaml
+    file: ./kitchen-timer/timer.yaml
     vars:
       index: 8
 
@@ -377,44 +383,7 @@ deep_sleep:
   run_duration: 1000ms
   sleep_duration: 5000ms
 
-wifi:
-  id: wifi_component
-  power_save_mode: HIGH
-  enable_on_boot: False
-  # fast_connect: True
-  networks:
-    # - ssid: !secret anton_phone.wifi_ssid
-    #   password: !secret anton_phone.wifi_password
-    - ssid: !secret parents.wifi_ssid
-      password: !secret parents.wifi_password
-    - ssid: !secret wifi_ssid
-      password: !secret wifi_password
 
-#   # Enable fallback hotspot (captive portal) in case wifi connection fails
-#   ap:
-#     ssid: "Kitchen-Timer Fallback Hotspot"
-#     password: "yOuGK5OiGnhg"
-
-# captive_portal:
-
-web_server:
-  port: 80
-  version: 3
-
-wireguard:
-  id: wireguard_component
-  address: !secret kitchen_timer.wireguard.address
-  netmask: !secret kitchen_timer.wireguard.netmask
-  private_key: !secret kitchen_timer.wireguard.private_key
-  peer_public_key: !secret kitchen_timer.wireguard.peer_public_key
-  peer_preshared_key: !secret kitchen_timer.wireguard.peer_preshared_key
-  peer_allowed_ips: 
-    - 192.168.1.0/24
-    - 192.168.2.0/24
-  peer_endpoint: !secret kitchen_timer.wireguard.peer_endpoint
-  peer_port: !secret kitchen_timer.wireguard.peer_port
-  peer_persistent_keepalive: !secret kitchen_timer.wireguard.peer_persistent_keepalive
-  reboot_timeout: 0s
 
 time:
   - platform: sntp
@@ -549,7 +518,9 @@ script:
                     --id(encoder_clicks_to_play);
                 - if:
                     condition:
-                      - script.is_running: deep_sleep_start
+                      or:
+                        - script.is_running: deep_sleep_start
+                        - switch.is_off: sound_menu_switch
                     then:
                       - delay: 2ms
                     else:
@@ -1052,9 +1023,6 @@ sensor:
   #     if(ESP_OK != esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_RTC_SLOW, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &result))
   #       return NAN;
   #     return result;
-  - platform: wireguard
-    latest_handshake:
-      name: 'WireGuard Latest Handshake'
   - platform: template
     name: SNTP Sync interval
     entity_category: DIAGNOSTIC
@@ -1513,43 +1481,8 @@ binary_sensor:
       mode:
         input: True
         pullup: True
-  - platform: template
-    name: Power AC
-    id: ac_powered
-    entity_category: DIAGNOSTIC
-    lambda: |
-      return id(fully_charged).state || id(charging_sensor).state;
-    on_state: 
-      then:
-        - lambda: |
-            auto index = id(wireguard_select).active_index();
-            if(!index.has_value() || index.value() != 1)
-              return;
-            if(x)
-              id(wireguard_component).enable();
-            else
-              id(wireguard_component).disable();
-        - lambda: |
-            esp_pm_config_esp32c3_t config;
-            auto result = esp_pm_get_configuration(&config);
-            if(ESP_OK != result) {
-              ESP_LOGE(TAG, "Can't get pm config, error %d", result);
-              return;
-            }
-            config.max_freq_mhz = x ? 160 : 80;
-            config.min_freq_mhz = x ? 160 : 80;
-            // config.light_sleep_enable = !x;
-            result = esp_pm_configure(&config);
-            if(ESP_OK != result) {
-              ESP_LOGE(TAG, "Can't set pm config, error %d", result);
-              return;
-            }
-        - script.execute: sntp_update_interval_setup
+  
         
-  - platform: wireguard
-    status:
-      entity_category: DIAGNOSTIC
-      name: 'WireGuard Status'
   - platform: template
     id: wifi_required
     lambda: |
@@ -1614,10 +1547,6 @@ text_sensor:
       auto&& ret = esp_sntp_getservername(2);
       if(ret) return {ret};
       return {};
-  - platform: wireguard
-    address:
-      entity_category: DIAGNOSTIC
-      name: 'WireGuard Address'
 button:
   - platform: restart
     name: Restart device
@@ -1638,6 +1567,7 @@ number:
   - platform: template
     id: alarm_timeout
     name: Alarm Timeout
+    entity_category: CONFIG
     min_value: 1
     max_value: 15
     step: 1
@@ -1659,7 +1589,7 @@ number:
         - globals.set: 
             id: sntp_ac_interval
             value: !lambda |
-              return 60.f*(x > 10079.0f ? NAN : x);
+              return 60.f*(x > 10079.0f ? NAN : x)*60.f;
         - script.execute: sntp_update_interval_setup
   - platform: template
     name: SNTP Battery Sync Interval
@@ -1675,7 +1605,7 @@ number:
         - globals.set: 
             id: sntp_battery_interval
             value: !lambda |
-              return (x > 10079.0f ? NAN : x);
+              return (x > 10079.0f ? NAN : x)*60.f;
         - script.execute: sntp_update_interval_setup
   - platform: template
     id: sntp_battery_sync_timeout
@@ -1751,278 +1681,13 @@ number:
         - lambda: |
             id(my_rtttl).set_gain(x);
 
-select:
-  - platform: template
-    id: wireguard_select
-    name: Wireguard Enabled
-    entity_category: CONFIG
-    restore_value: True
-    optimistic: True
-    initial_option: AC
-    options: 
-      - "Never"
-      - "AC"
-      - "Always"
-    on_value: 
-      then:
-        - lambda: |
-            switch(i) {
-              case 0:
-                id(wireguard_component).disable();
-                break;
-              case 1:
-                if(id(ac_powered).state)
-                  id(wireguard_component).enable();
-                else
-                  id(wireguard_component).disable();
-                break;
-              case 2:
-                id(wireguard_component).enable();
-                break;
-            }
-
 lcd_menu_7segment:
-  id: menu
-  mode: rotary
-  active: false
   items:
-    - text: "ТАйМ"
-      type: menu
+    - id: !extend menu_item_battery_menu
       items:
-        - type: custom
-          text: "СТАР"
-          value_lambda: |
-            const auto& seconds = id(menu_recent_timer) < id(recent_timers).size() 
-                ? id(recent_timers)[id(menu_recent_timer)] 
-                : *menu_new_timer_iterator;
-            if(seconds == 0) return "$menu_text_back";
-            return timer_value_string(seconds);
-          on_enter:
-            then:
-              lambda: |
-                id(menu_recent_timer) = 0xff;
-                menu_new_timer_iterator = TimerValueIterator{};
-          on_leave:
-            lambda: |
-              if(id(menu_exit_request)) {
-                return;
-              }
-
-              ESP_LOGD(TAG, "Leaving start timer menu");
-              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
-              auto i_free_timer = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
-                return !timer->get_seconds_remain();
-              });
-              if(i_free_timer == timer_list.end()) {
-                ESP_LOGE(TAG, "Can't find free timer");
-                return;
-              }
-              auto seconds = id(menu_recent_timer) < id(recent_timers).size() 
-                ? id(recent_timers)[id(menu_recent_timer)] 
-                : *menu_new_timer_iterator;
-              if(seconds) {
-                ESP_LOGD(TAG, "Starting a timer for %d seconds", seconds);
-                (*i_free_timer)->start(seconds);
-                add_to_recent_timers(id(recent_timers), seconds);
-                id(menu_exit_request) = true;
-              }
-          on_next:
-            then:
-              lambda: |
-                auto& i = id(menu_recent_timer);
-                if(i == 0xff) {
-                  if(menu_new_timer_iterator == TimerValueIterator{}) {
-                    const auto& vec = id(recent_timers);
-                    if(vec.front() != 0) {
-                      i = 0;
-                    }
-                  } else {
-                    --menu_new_timer_iterator;
-                  }
-                } else {
-                  const auto& vec = id(recent_timers);
-                  auto next = id(menu_recent_timer) + 1;
-                  if(next < vec.size() && vec[next] != 0) {
-                    i = next;
-                  }
-                }
-          on_prev:
-            then:
-              lambda: |
-                if(id(menu_recent_timer) == 0) {
-                  id(menu_recent_timer) = 0xff;
-                } else if(id(menu_recent_timer) == 0xff) {
-                  if(*menu_new_timer_iterator < 24*60*60)
-                    ++menu_new_timer_iterator;
-                } else if(id(menu_recent_timer) > 0) {
-                  id(menu_recent_timer)--;
-                }
-        - text: "СТОП"
-          type: custom          
-          value_lambda: |
-            if(id(menu_current_running_timer_component) == nullptr) return "$menu_text_back";
-            const auto& seconds_remain = id(frame)%2 == 0 
-              ? id(menu_current_running_timer_component)->get_seconds_remain()
-              : id(menu_current_running_timer_component)->get_start_seconds();
-            return timer_value_string(seconds_remain ? *seconds_remain : 0);
-          on_enter:
-            lambda: |
-              std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
-              auto i = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
-                  return !!timer->get_seconds_remain();
-                });
-
-              id(menu_current_running_timer_component) = i == timer_list.end() ? nullptr : *i;
-          on_next:
-            lambda: |
-              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
-              if(id(menu_current_running_timer_component) == nullptr) return;
-              const auto i = std::find_if(
-                std::next(std::find(timer_list.begin(), timer_list.end(), id(menu_current_running_timer_component))),
-                timer_list.end(),
-                [](esphome::timer::TimerComponent* timer){
-                  return !!timer->get_seconds_remain();
-                });
-              id(menu_current_running_timer_component) = i == timer_list.end() ? nullptr : *i;
-          on_prev:
-            lambda: |
-              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
-              const auto i_start = id(menu_current_running_timer_component) == nullptr
-                ? timer_list.rbegin()
-                : std::next(std::find(timer_list.rbegin(), timer_list.rend(), id(menu_current_running_timer_component)));
-              auto i = std::find_if(
-                i_start,
-                timer_list.rend(),
-                [](esphome::timer::TimerComponent* timer) {
-                  return !!timer->get_seconds_remain();
-                });
-
-              id(menu_current_running_timer_component) = i == timer_list.rend() ? id(menu_current_running_timer_component) : *i;
-          on_leave:
-            lambda: |
-              if(id(menu_exit_request)) {
-                return;
-              }
-              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
-              if(id(menu_current_running_timer_component)) {
-                id(menu_current_running_timer_component)->start(0);
-              }
         - type: back
+          id: menu_item_battery_back
           text: $menu_text_back
-    - type: number
-      id: brightness_menu_item
-      text: "ЯРКО"
-      immediate_edit: false
-      value_lambda: |
-        std::string result = "Auto";
-        const auto& x = id(display_intensity).state;
-        if(x >= 0) {
-          result.clear();
-          for(int i = 0; i < 4; ++i) {
-            result.push_back('0'+x+1);
-          }
-        }
-        return result;
-      number: display_intensity
-    - text: "ПОВО"
-      type: switch
-      id: turn_menu_item
-      immediate_edit: false
-      on_text: "12.34"
-      off_text: "12.34"
-      switch: display_flip
-    - text: ЗВУК
-      type: menu
-      items:
-        - type: switch
-          text: TAйМ
-          on_text: "On"
-          off_text: "OFF"
-          switch: sound_timer_tick_switch
-        - type: switch
-          text: СЕКУ
-          on_text: "On"
-          off_text: "OFF"
-          switch: sound_tick_switch
-        - type: switch
-          text: mEnu
-          on_text: "On"
-          off_text: "OFF"
-          switch: sound_menu_switch
-        - type: back
-          text: $menu_text_back
-    - text: БАТА
-      type: menu
-      items:
-        - type: custom
-          text: СТАТ
-          on_enter:
-            - globals.set:
-                id: menu_bat_stat
-                value: "0"
-          on_next:
-            - lambda: id(menu_bat_stat)++;
-          on_prev:
-            - lambda: id(menu_bat_stat)--;
-          value_lambda: |
-            char buff[6] = "";
-            auto index = id(menu_bat_stat)%4;
-            switch(index) {
-              case 0:
-                snprintf(buff, 6, "Б%3.0f", kitchen_timer::last_battery_percentage);
-                break;
-              case 1:
-                snprintf(buff, 6, "%0.3f", isnan(id(battery_voltage).state)
-                  ? id(charging_voltage).state 
-                  : id(battery_voltage).state);
-                std::replace(std::begin(buff), std::end(buff), '.', 'U');
-                break;
-              case 2:
-                if(!isnan(id(charging_current).state)) {
-                  snprintf(buff, 6, "%.3f", id(charging_current).state*0.001);
-                  if(buff[0] == '0') {
-                    std::copy(std::begin(buff)+1, std::end(buff), std::begin(buff));
-                  }
-                } else {
-                  snprintf(buff, 6, "  0.");
-                }
-                std::replace(std::begin(buff), std::end(buff), '.', 'A');
-                break;
-              case 3:
-                return "$menu_text_back";
-            }
-            return {buff};
-
-        - text: "СЕРВ"
-          type: switch
-          switch: online_on_battery
-          on_text: "ВСЕГ"
-          off_text: "СЕТЬ"
-        - text: WrGr
-          type: select
-          select: wireguard_select
-          value_lambda: |
-            const auto& index = id(wireguard_select).active_index();
-            if(index.has_value()) {
-              switch(index.value()) {
-                case 0:
-                  return "ЗАПР";
-                case 1:
-                  return "СЕТЬ";
-                case 2:
-                  return "ВСЕГ";
-              }
-            }
-            return "----";
-        - type: back
-          text: $menu_text_back
-    - text: $menu_text_back
-      type: command
-      on_value:
-        then:
-          - display_menu.hide:
-          - component.update: tm1637_display
-
 display:
   platform: tm1637
   id: tm1637_display

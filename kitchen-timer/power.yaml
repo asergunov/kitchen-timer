@@ -1,0 +1,25 @@
+binary_sensor:
+  - platform: template
+    name: Power AC
+    id: ac_powered
+    entity_category: DIAGNOSTIC
+    lambda: |
+      return id(fully_charged).state || id(charging_sensor).state;
+    on_state: 
+      then:
+        - lambda: |
+            esp_pm_config_esp32c3_t config;
+            auto result = esp_pm_get_configuration(&config);
+            if(ESP_OK != result) {
+              ESP_LOGE(TAG, "Can't get pm config, error %d", result);
+              return;
+            }
+            config.max_freq_mhz = x ? 160 : 80;
+            config.min_freq_mhz = x ? 160 : 80;
+            // config.light_sleep_enable = !x;
+            result = esp_pm_configure(&config);
+            if(ESP_OK != result) {
+              ESP_LOGE(TAG, "Can't set pm config, error %d", result);
+              return;
+            }
+        - script.execute: sntp_update_interval_setup

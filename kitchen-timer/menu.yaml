@@ -1,0 +1,225 @@
+lcd_menu_7segment:
+  id: menu
+  mode: rotary
+  active: false
+  items:
+    - text: "ТАйМ"
+      type: menu
+      items:
+        - type: custom
+          text: "СТАР"
+          value_lambda: |
+            const auto& seconds = id(menu_recent_timer) < id(recent_timers).size() 
+                ? id(recent_timers)[id(menu_recent_timer)] 
+                : *menu_new_timer_iterator;
+            if(seconds == 0) return "$menu_text_back";
+            return timer_value_string(seconds);
+          on_enter:
+            then:
+              lambda: |
+                id(menu_recent_timer) = 0xff;
+                menu_new_timer_iterator = TimerValueIterator{};
+          on_leave:
+            lambda: |
+              if(id(menu_exit_request)) {
+                return;
+              }
+
+              ESP_LOGD(TAG, "Leaving start timer menu");
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              auto i_free_timer = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
+                return !timer->get_seconds_remain();
+              });
+              if(i_free_timer == timer_list.end()) {
+                ESP_LOGE(TAG, "Can't find free timer");
+                return;
+              }
+              auto seconds = id(menu_recent_timer) < id(recent_timers).size() 
+                ? id(recent_timers)[id(menu_recent_timer)] 
+                : *menu_new_timer_iterator;
+              if(seconds) {
+                ESP_LOGD(TAG, "Starting a timer for %d seconds", seconds);
+                (*i_free_timer)->start(seconds);
+                add_to_recent_timers(id(recent_timers), seconds);
+                id(menu_exit_request) = true;
+              }
+          on_next:
+            then:
+              lambda: |
+                auto& i = id(menu_recent_timer);
+                if(i == 0xff) {
+                  if(menu_new_timer_iterator == TimerValueIterator{}) {
+                    const auto& vec = id(recent_timers);
+                    if(vec.front() != 0) {
+                      i = 0;
+                    }
+                  } else {
+                    --menu_new_timer_iterator;
+                  }
+                } else {
+                  const auto& vec = id(recent_timers);
+                  auto next = id(menu_recent_timer) + 1;
+                  if(next < vec.size() && vec[next] != 0) {
+                    i = next;
+                  }
+                }
+          on_prev:
+            then:
+              lambda: |
+                if(id(menu_recent_timer) == 0) {
+                  id(menu_recent_timer) = 0xff;
+                } else if(id(menu_recent_timer) == 0xff) {
+                  if(*menu_new_timer_iterator < 24*60*60)
+                    ++menu_new_timer_iterator;
+                } else if(id(menu_recent_timer) > 0) {
+                  id(menu_recent_timer)--;
+                }
+        - text: "СТОП"
+          type: custom          
+          value_lambda: |
+            if(id(menu_current_running_timer_component) == nullptr) return "$menu_text_back";
+            const auto& seconds_remain = id(frame)%2 == 0 
+              ? id(menu_current_running_timer_component)->get_seconds_remain()
+              : id(menu_current_running_timer_component)->get_start_seconds();
+            return timer_value_string(seconds_remain ? *seconds_remain : 0);
+          on_enter:
+            lambda: |
+              std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              auto i = std::find_if(timer_list.begin(), timer_list.end(), [](esphome::timer::TimerComponent* timer){
+                  return !!timer->get_seconds_remain();
+                });
+
+              id(menu_current_running_timer_component) = i == timer_list.end() ? nullptr : *i;
+          on_next:
+            lambda: |
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              if(id(menu_current_running_timer_component) == nullptr) return;
+              const auto i = std::find_if(
+                std::next(std::find(timer_list.begin(), timer_list.end(), id(menu_current_running_timer_component))),
+                timer_list.end(),
+                [](esphome::timer::TimerComponent* timer){
+                  return !!timer->get_seconds_remain();
+                });
+              id(menu_current_running_timer_component) = i == timer_list.end() ? nullptr : *i;
+          on_prev:
+            lambda: |
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              const auto i_start = id(menu_current_running_timer_component) == nullptr
+                ? timer_list.rbegin()
+                : std::next(std::find(timer_list.rbegin(), timer_list.rend(), id(menu_current_running_timer_component)));
+              auto i = std::find_if(
+                i_start,
+                timer_list.rend(),
+                [](esphome::timer::TimerComponent* timer) {
+                  return !!timer->get_seconds_remain();
+                });
+
+              id(menu_current_running_timer_component) = i == timer_list.rend() ? id(menu_current_running_timer_component) : *i;
+          on_leave:
+            lambda: |
+              if(id(menu_exit_request)) {
+                return;
+              }
+              const std::vector<esphome::timer::TimerComponent*> timer_list{$timer_list};
+              if(id(menu_current_running_timer_component)) {
+                id(menu_current_running_timer_component)->start(0);
+              }
+        - type: back
+          text: $menu_text_back
+    - type: number
+      id: brightness_menu_item
+      text: "ЯРКО"
+      immediate_edit: false
+      value_lambda: |
+        std::string result = "Auto";
+        const auto& x = id(display_intensity).state;
+        if(x >= 0) {
+          result.clear();
+          for(int i = 0; i < 4; ++i) {
+            result.push_back('0'+x+1);
+          }
+        }
+        return result;
+      number: display_intensity
+    - text: "ПОВО"
+      type: switch
+      id: turn_menu_item
+      immediate_edit: false
+      on_text: "12.34"
+      off_text: "12.34"
+      switch: display_flip
+    - text: ЗВУК
+      type: menu
+      items:
+        - type: switch
+          text: TAйМ
+          on_text: "On"
+          off_text: "OFF"
+          switch: sound_timer_tick_switch
+        - type: switch
+          text: СЕКУ
+          on_text: "On"
+          off_text: "OFF"
+          switch: sound_tick_switch
+        - type: switch
+          text: mEnu
+          on_text: "On"
+          off_text: "OFF"
+          switch: sound_menu_switch
+        - type: back
+          text: $menu_text_back
+    - id: menu_item_battery_menu
+      text: БАТА
+      type: menu
+      items:
+        - type: custom
+          text: СТАТ
+          on_enter:
+            - globals.set:
+                id: menu_bat_stat
+                value: "0"
+          on_next:
+            - lambda: id(menu_bat_stat)++;
+          on_prev:
+            - lambda: id(menu_bat_stat)--;
+          value_lambda: |
+            char buff[6] = "";
+            auto index = id(menu_bat_stat)%4;
+            switch(index) {
+              case 0:
+                snprintf(buff, 6, "Б%3.0f", kitchen_timer::last_battery_percentage);
+                break;
+              case 1:
+                snprintf(buff, 6, "%0.3f", isnan(id(battery_voltage).state)
+                  ? id(charging_voltage).state 
+                  : id(battery_voltage).state);
+                std::replace(std::begin(buff), std::end(buff), '.', 'U');
+                break;
+              case 2:
+                if(!isnan(id(charging_current).state)) {
+                  snprintf(buff, 6, "%.3f", id(charging_current).state*0.001);
+                  if(buff[0] == '0') {
+                    std::copy(std::begin(buff)+1, std::end(buff), std::begin(buff));
+                  }
+                } else {
+                  snprintf(buff, 6, "  0.");
+                }
+                std::replace(std::begin(buff), std::end(buff), '.', 'A');
+                break;
+              case 3:
+                return "$menu_text_back";
+            }
+            return {buff};
+
+        - text: "СЕРВ"
+          id: menu_item_server
+          type: switch
+          switch: online_on_battery
+          on_text: "ВСЕГ"
+          off_text: "СЕТЬ"
+    - text: $menu_text_back
+      type: command
+      on_value:
+        then:
+          - display_menu.hide:
+          - component.update: tm1637_display

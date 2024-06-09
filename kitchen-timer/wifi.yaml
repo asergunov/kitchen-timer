@@ -1,0 +1,37 @@
+substitutions:
+  wifi_ssid1: !secret anton_phone.wifi_ssid
+  wifi_password1: !secret anton_phone.wifi_password
+  wifi_ssid2: !secret parents.wifi_ssid
+  wifi_password2: !secret parents.wifi_password
+  wifi_ssid3: !secret wifi_ssid
+  wifi_password3: !secret wifi_password
+
+globals:
+  id: wifi_list
+  type: std::vector<esphome::wifi::WiFiAP>
+  initial_value: |
+    [](){
+      std::vector<esphome::wifi::WiFiAP> result;
+
+      return result;
+    }()
+
+wifi:
+  id: wifi_component
+  power_save_mode: HIGH
+  enable_on_boot: False
+  # fast_connect: True
+  networks:
+    - ssid: $wifi_ssid1
+      password: $wifi_password1
+    - ssid: !secret parents.wifi_ssid
+      password: !secret parents.wifi_password
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+
+#   # Enable fallback hotspot (captive portal) in case wifi connection fails
+#   ap:
+#     ssid: "Kitchen-Timer Fallback Hotspot"
+#     password: "yOuGK5OiGnhg"
+
+# captive_portal:

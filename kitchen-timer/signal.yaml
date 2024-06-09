@@ -1,0 +1,55 @@
+text:
+  - platform: template
+    id: signal_${index}_time
+    name: Signal ${index}
+    mode: text
+    restore_value: True
+    optimistic: True
+    min_length: 0
+    max_length: 5
+    on_value:
+      - then:
+          - lambda: |
+              id(signal_${index}_daily_signal)->set_signal_time(x);
+
+select:
+  - platform: template
+    id: signal_${index}_sound
+    name: Signal ${index} Sound
+    optimistic: True
+    restore_value: True
+    options: [""]
+
+button:
+  - platform: template
+    id: signal_${index}_test_button
+    name: Signal ${index} Test
+    on_press:
+      then:
+        - if:
+            condition: 
+              not: 
+                - script.is_running: play_signal
+            then:
+              - if:
+                  condition: rtttl.is_playing
+                  then:
+                    - rtttl.stop:
+                  else:
+                    - rtttl.stop:
+                    - rtttl.play: !lambda return song_by_index( id(signal_${index}_sound).active_index());
+
+time:
+  - platform: daily_signal
+    id: signal_${index}_daily_signal
+    on_time:
+      then:
+        - lambda: |
+            // workaround on strftime is non const
+            auto signal_time = id(signal_${index}_daily_signal).get_signal_time();
+            const auto& song_index = id(signal_${index}_sound).active_index();
+            alarms::push(
+              song_index ? *song_index : 0, {
+                signal_time.strftime("%H.%M"),
+                ""
+              });
