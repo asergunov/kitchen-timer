@@ -1,3 +1,32 @@
+globals:
+  - id: menu_bat_stat
+    type: uint8_t
+  - id: menu_exit_request
+    type: bool
+    initial_value: "false"
+  - id: recent_timers
+    type: std::array<esphome::timer::seconds_type, 8>
+    restore_value: True
+  - id: menu_current_running_timer_component
+    type: esphome::timer::TimerComponent*
+    initial_value: "nullptr"
+  - id: menu_recent_timer
+    type: uint8_t
+    initial_value: "0"
+
+script:                  
+  - id: auto_menu_exit
+    mode: restart
+    then:
+      - wait_until:
+          condition:
+            - lambda: return id(menu_exit_request);
+          timeout: 60s
+      - globals.set: 
+          id: menu_exit_request
+          value: "false"
+      - display_menu.hide:
+
 lcd_menu_7segment:
   id: menu
   mode: rotary
@@ -168,58 +197,47 @@ lcd_menu_7segment:
           switch: sound_menu_switch
         - type: back
           text: $menu_text_back
-    - id: menu_item_battery_menu
+    - type: custom
       text: БАТА
-      type: menu
-      items:
-        - type: custom
-          text: СТАТ
-          on_enter:
-            - globals.set:
-                id: menu_bat_stat
-                value: "0"
-          on_next:
-            - lambda: id(menu_bat_stat)++;
-          on_prev:
-            - lambda: id(menu_bat_stat)--;
-          value_lambda: |
-            char buff[6] = "";
-            auto index = id(menu_bat_stat)%4;
-            switch(index) {
-              case 0:
-                snprintf(buff, 6, "Б%3.0f", kitchen_timer::last_battery_percentage);
-                break;
-              case 1:
-                snprintf(buff, 6, "%0.3f", isnan(id(battery_voltage).state)
-                  ? id(charging_voltage).state 
-                  : id(battery_voltage).state);
-                std::replace(std::begin(buff), std::end(buff), '.', 'U');
-                break;
-              case 2:
-                if(!isnan(id(charging_current).state)) {
-                  snprintf(buff, 6, "%.3f", id(charging_current).state*0.001);
-                  if(buff[0] == '0') {
-                    std::copy(std::begin(buff)+1, std::end(buff), std::begin(buff));
-                  }
-                } else {
-                  snprintf(buff, 6, "  0.");
-                }
-                std::replace(std::begin(buff), std::end(buff), '.', 'A');
-                break;
-              case 3:
-                return "$menu_text_back";
+      on_enter:
+        - globals.set:
+            id: menu_bat_stat
+            value: "0"
+      on_next:
+        - lambda: id(menu_bat_stat)++;
+      on_prev:
+        - lambda: id(menu_bat_stat)--;
+      value_lambda: |
+        char buff[6] = "";
+        auto index = id(menu_bat_stat)%4;
+        switch(index) {
+          case 0:
+            snprintf(buff, 6, "Б%3.0f", kitchen_timer::last_battery_percentage);
+            break;
+          case 1:
+            snprintf(buff, 6, "%0.3f", isnan(id(battery_voltage).state)
+              ? id(charging_voltage).state 
+              : id(battery_voltage).state);
+            std::replace(std::begin(buff), std::end(buff), '.', 'U');
+            break;
+          case 2:
+            if(!isnan(id(charging_current).state)) {
+              snprintf(buff, 6, "%.3f", id(charging_current).state*0.001);
+              if(buff[0] == '0') {
+                std::copy(std::begin(buff)+1, std::end(buff), std::begin(buff));
+              }
+            } else {
+              snprintf(buff, 6, "  0.");
             }
-            return {buff};
-
-        - text: "СЕРВ"
-          id: menu_item_server
-          type: switch
-          switch: online_on_battery
-          on_text: "ВСЕГ"
-          off_text: "СЕТЬ"
-    - text: $menu_text_back
-      type: command
-      on_value:
-        then:
-          - display_menu.hide:
-          - component.update: tm1637_display
+            std::replace(std::begin(buff), std::end(buff), '.', 'A');
+            break;
+          case 3:
+            return "$menu_text_back";
+        }
+        return {buff};
+    - text: "СЕРВ"
+      id: menu_item_server
+      type: switch
+      switch: online_on_battery
+      on_text: "ВСЕГ"
+      off_text: "СЕТЬ"

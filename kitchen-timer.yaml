@@ -1,5 +1,5 @@
 # cSpell:words bootloader datapoints useconds veml
-# cSpell:ignore GDBSTUB CRYS LWIP НАЗА wdtc setenv tzset nullptr IMMED isnan getserver getservername ledc preshared keepalive rbegin ПОВО СЕРВ ВСЕГ spect
+# cSpell:ignore GDBSTUB CRYS LWIP НАЗА wdtc setenv tzset nullptr isnan getserver getservername ledc preshared keepalive rbegin ПОВО СЕРВ ВСЕГ spect
 esp32:
   board: esp32-c3-devkitm-1
   # framework:
@@ -18,26 +18,8 @@ esp32:
       # CONFIG_PM_DFS_INIT_AUTO: y
       # CONFIG_ESP_INT_WDT: n
       CONFIG_ESP32C3_RTC_CLK_SRC_EXT_CRYS: y
-      CONFIG_LWIP_SNTP_MAX_SERVERS: '3'
       CONFIG_ESP32C3_RTC_CLK_CAL_CYCLES: '5000'
       CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP: y
-
-# Enable logging
-logger:
-  level: INFO
-  logs:
-    esp-idf: WARN
-    web_server_idf: ERROR # Suppress warnings
-    # component: ERROR # Suppress long update messages
-  
-  # level: DEBUG
-  # logs:
-  #   # kitchen-timer: INFO
-  #   main: INFO
-  #   number: INFO
-  #   timer: INFO
-  #   text: INFO
-  #   sensor: INFO
 
 external_components:
   - source: "github://asergunov/esphome_esphome@rtttl_pm"
@@ -54,10 +36,6 @@ external_components:
     components:
       - template
     refresh: 0s
-  - source: "github://asergunov/esphome_esphome@sntp"
-    components:
-      - sntp
-    refresh: 0s
   # - source: "github://asergunov/esphome_esphome@deep_sleep"
   #   components:
   #     - deep_sleep
@@ -68,9 +46,6 @@ external_components:
       - timer
 
 substitutions:
-  # 32KHz: 0,1
-  # ADC1: 0,1,2,3,4
-  # ADC2: 5
   display_clk_pin: "21"
   display_dio_pin: "10"
   power_sawing_pin: "20"
@@ -117,14 +92,15 @@ esphome:
           value: !lambda return 0.0f;
       - lambda: |
           #if ESP_IDF_VERSION_MAJOR >= 5
-          esp_task_wdt_config_t wdtc;
-          wdtc.idle_core_mask = 0;
-          wdtc.timeout_ms = 1500;
-          wdtc.trigger_panic = false;
+            esp_task_wdt_config_t wdtc;
+            wdtc.idle_core_mask = 0;
+            wdtc.timeout_ms = 1500;
+            wdtc.trigger_panic = true;
           esp_task_wdt_reconfigure(&wdtc);
           #else
-          esp_task_wdt_init(1500, false);
+            esp_task_wdt_init(1500, true);
           #endif
+      - lambda: |
           setenv("TZ", "${timezone}", 1);
           tzset();
       - globals.set:
@@ -143,52 +119,13 @@ esphome:
       # - lambda: |
       #     App.set_loop_interval(100);
       - script.execute: update_display_loop
-      - script.execute: sntp_updater_loop
       - if:
           condition:
             - lambda: return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
           then:
             - script.execute: play_battery_animation
-      - script.execute: sntp_update_interval_setup
-      - script.execute: encoder_clicks_loop
-  on_loop: 
-    then:
-      - if:
-          condition:
-            and:
-              - binary_sensor.is_on: encoder_button
-              - lambda: |
-                  const auto delta = millis() - id(encoder_button_press_timestamp);
-                  return delta > 1000;
-          then:
-            - lambda: |
-                id(encoder_button_press_timestamp) = millis();
-            - if:
-                condition:
-                  - display_menu.is_active:
-                then:
-                  - display_menu.hide:
-                  - component.update: tm1637_display
-                else:
-                  - script.execute: deep_sleep_start   
 
 globals:
-  - id: encoder_clicks_to_play
-    type: uint8_t
-    initial_value: "0"
-  - id: encoder_button_press_timestamp
-    type: uint32_t
-    initial_value: "millis()"
-  - id: menu_bat_stat
-    type: uint8_t
-  - id: sntp_ac_interval
-    type: float
-    initial_value: "60 * 60" # 1h interval
-    restore_value: True
-  - id: sntp_battery_interval
-    type: float
-    initial_value: "NAN" # Don't update
-    restore_value: True
   - id: sleep_back
     type: bool
     initial_value: "false"
@@ -198,9 +135,6 @@ globals:
   # - id: playing_battery_animation_frame
   #   type: uint8_t
   #   initial_value: "0"
-  - id: menu_exit_request
-    type: bool
-    initial_value: "false"
   - id: signal_stop_request
     type: bool
     initial_value: "false"
@@ -215,70 +149,6 @@ globals:
   - id: frame
     type: uint8_t
     initial_value: "0"
-  - id: recent_timers
-    type: std::array<esphome::timer::seconds_type, 8>
-    restore_value: True
-  - id: menu_current_running_timer_component
-    type: esphome::timer::TimerComponent*
-    initial_value: "nullptr"
-  - id: menu_recent_timer
-    type: uint8_t
-    initial_value: "0"
-  - id: songs
-    type: std::vector<std::string>
-    restore_value: no
-    initial_value: |-
-      {
-        "two_short:d=4,o=5,b=100:16e6,16e6",
-        "Boop:d=4,o=5,b=250:c5",
-        "Beep:d=4,o=5,b=250:c6",
-        "BeepBeep:d=4,o=5,b=250:c6,p,c6",
-        "NokiaTun:d=4,o=5,b=225:8e6,8d6,f#,g#,8c#6,8b,d,e,8b,8a,c#,e,2a",
-        "long:d=1,o=5,b=100:e6",
-        "siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e",
-        "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b",
-        "Thunderb:d=4,o=5,b=125:8g#5,16f5,16g#5,a#5,8p,16d#5,16f5,8g#5,8a#5,8d#6,16f6,16c6,8d#6,8f6,2a#5,8g#5,16f5,16g#5,a#5,8p,16d#5,16f5,8g#5,8a#5,8d#6,16f6,16c6,8d#6,8f6,2g6,8g6,16a6,16e6,g6,8p,16e6,16d6,8c6,8b5,8a.5,16b5,8c6,8e6,2d6,8d#6,16f6,16c6,d#6,8p,16c6,16a#5,8g#5,8g5,8f.5,16g5,8g#5,8a#5,8c6,8a#5,8g5,8d#5",
-        "RightHer:d=4,o=5,b=125:8a,8b,8c6,8b,8d6,8c6,8b,8a,8g,8a,8b,8a,8c6,8b,8a,8g,8a,8b,8c6,8b,8d6,8c6,8b,8a,8g,8a,8b,8a,8c6,8b,8a,8b,8a,p,8a,8e,p,8b,8a,p,8a,8e",
-        "SkippyTh:d=4,o=5,b=112:16f,16g,16a,a#,32p,16d,8c,p,16f,16a#,16a#,16a#,16a#,16p,16d,c,32p,16f,16a#,16a#,16a#,8a#,16d,16c,16p,16d,16d#,16p,16c,16d,8p,8f,16p,f.",
-        "BevHills:d=4,o=5,b=160:f#,8a.,8f#,16f#,8a#,8f#,8e,f#,8c.6,8f#,16f#,8d6,8c#6,8a,8f#,8c#6,8f#6,16f#,8e,16e,8c#,8g#,f#.",
-        "Elec6:d=16,o=5,b=180:8d.,p,d,p,f,p,g,p,f,p,32d,p.,32c#,p.,8c.,p,32c,p.,8a.4,p,32c,p.,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c,p.,8d.,p,d,p,f,p,g,p,f,p,d,p,32c#,p.,8c.,p,32c,p.,8a.4,p,c,p,32c#,p.,32c",
-        "MontyPython:d=4,o=5,b=200:32p,f6,8e6,d6,8c#6,c6,8b,a#,8a,8g,8a,8a#,a,8g,2c6,8p,8c6,8a,8p,8a,8a,8g#,8a,8f6,8p,8c6,8c6,8p,8a,8a#,8p,8a#,8a#,8p,8c6,2d6,8p,8a#,8g,8p,8g,8g,8f#,8g,8e6,8p,8d6,8d6,8p,8a#,8a,8p,8a,8a,8p,8a#,2c6,8p,8c6",
-        "PiratesTheme:d=4,o=6,b=200:8d,8e,2f,8g,8a,g,f,e,f,g,a,g,p,8f,8g,a,p,8g,8f,e,f,e,d,p,8e,8c,d,8p,p,8d,8e,f,p,8e,8f,g,f,g,a,g,f,d",
-        "Twilight:d=16,o=7,b=285:a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,8p,a#,a,8p,a#,g#,8p,a#,e,8p,a#,g#,b5,c#6,b5,c#6,b5,c#6,b5,c#6,b5,c#6,b5,d6,a#5,d6,a#5,d#6,a5,2p.,g6,a#6,d#,e,c#,e,d#,a#6,g#6,a#6,e,g#,e,a#",
-        "XFiles1:d=4,o=5,b=125:e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,g6,f#6,e6,d6,e6,2b.,1p,g6,f#6,e6,d6,f#6,2b.,1p,e,b,a,b,d6,2b.,1p,e,b,a,b,e6,2b.,1p,e6,2b.",
-        "MissionTheme:d=4,o=5,b=112:16g6,8p,16g6,8p,16f6,16p,16f#6,16p,16g6,8p,16g6,8p,16a#6,16p,16c7,16p,16g6,8p,16g6,8p,16f6,16p,16f#6,16p,16g6,8p,16g6,8p,16a#6,16p,16c7,16p,16a#6,16g6,2d6,32p,16a#6,16g6,2c#6,32p,16a#6,16g6,2c6,16p,16a#,16c6"
-        "Pacman:d=32,o=5,b=112:32p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,c6,p,c7,p,g6,p,e6,p,c7,g6,16p,16e6,16p,b,p,b6,p,f#6,p,d#6,p,b6,f#6,16p,16d#6,16p,d#6,e6,f6,p,f6,f#6,g6,p,g6,g#6,a6,p,b.6",
-        "Druid:d=4,o=5,b=80:8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,c7,d7,8p,8d.7,16d#7,16d7,16d#7,d7,8c7,16a#6,16c7,a6,g6,8p,8g.6,16a6,16a#6,16g6,c7,8a#6,16a6,16a#6,8a6,8f6,g6",
-        "Lemmings:d=4,o=5,b=140:f#6,8f#.6,16f#6,8f#.6,16e6,d6,f#6,8f#.6,16f#6,16f#.6,16g6,16f#.6,e6,f#6,8f#.6,16f#6,8f#.6,16g6,a6,1c#6,b,8b.,16b,8b.,16c#6,d6,c#6,8c#.6,16c#6,8c#.6,16d6,e6,a6,f#6,d6,a,1e6",
-        "MagicPockets:d=4,o=5,b=112:8f#6,8c#6,p,8c#6,8d#6,8c#6,8e6,8p,8d#6,16p,8c#6,16p,8c#6,8d#6,8c#6,8f#6,8c#6,p,8c#6,8d#6,8c#6,8e6,8p,8d#6,16p,8c#6,16p,8c#6,8d#6,8c#6,8a#.6,8f#.6,8c#6,8d#.6,8f#.6,8g#6,8a#.6,8f#.6,8c#6,8d#.6,8f#.6,8g#6,2a#6,8d#.6,8f#.6,8g#6,a.6,8g#6,16f#6,16d#6,c#6",
-        "RickD:d=4,o=5,b=160:16f#4,f#4,f#,c#.,16a#4,b4,c#,d#.,16c#,c#,g#,f.,16c#,d#,f,f#.,16f#4,f#4,f#,c#.,16a#4,b4,c#,2d#,a,p,b,p,a#4,c#,2f#4",
-        "c64_bjack:d=4,o=5,b=225:f6,g#6,g#6,8c#7,8d#7,f7,c#7,2c#7,f6,g#6,g#6,8c#7,8f7,f7,d#7,2d#7,f6,g#6,g#6,8f7,8g#7,g#7,f#7,2f#7,g#7,f#7,f7,d#7,c#7,c7,a#6,c7,1c#7",
-        "Comicb:d=4,o=5,b=125:8g,16g,16g,16f6,16g6,16g,16g,8g,16g,16g,16f6,16g6,16g,16g,8a#,16a#,16a#,16g#6,16a#6,16a#,16a#,8f,16f,16f,16d#6,16f6,16f,16f,8g,16g,16g,16f6,16g6,16g,16g,8g,16g,16g,16f6,16g6,16g,16g,8a#,16a#,16a#,16g#6,16a#6,16a#,16a#,8c6,16c6,16c6,16a#6,16c7,16c6,16c6",
-        "WormSong:d=4,o=5,b=112:g,a,b.,8d6,d6,8c6,8b,8a.,16g,8a,8b,2a,32p,8a.,16g,8a,8b,2e,32p,8a.,16g,8a,8b,a,8g,8a,b.,8d6,d6,8c6,8b,8a.,16g,8a,8b,2a,32p,8a.,16g,8a,8b,2e,32p,8a.,16g,8a,8b,a",
-        "Flimboq1:d=4,o=5,b=125:16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8d.6,c6,8p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,8g,16a#,16p,8g,f.,p,16c#6,16d6,16a#,16p,16a#,16p,16a#,16p,8a#,16p,16a#,8p,16a#,16p,8d6,8c6,8a#,c6,8a#,8c6,8a#,8d6,8f6,8d6,8f6,8d6,8c6,8a#,8g,8f,8g,8a#,a#",
-        "GoldenAxe:d=4,o=5,b=112:8a4,32p,16b4,16p,2c,16p,8a4,32p,16b4,16p,2c,16p,8b4,32p,16c,16p,d,32p,8g.4,16c,16b4,2a4",
-        "Giana:d=4,o=5,b=125:8g,8g,8a,8g,8a#,8g,8a,8g,8g,8g,8c6,8g,8a#,8g,8a,8g,8g,8f,8a,8f,8a#,8f,8c6,8f,8d6,8f,8c6,8f,8a#,8f,8a,8f,8g,8d#,8a,8d#,8a#,8d#,8a,8d#,8g,8d#,8c6,8d#,8a#,8d#,8a,8d#,8f#,8d,8g,8d,8a,8d,8a#,8d,8c6,8d,8d6,8d,8a#,8d,8a,8d",
-        "Krakout:d=4,o=4,b=160:16b,16p,16b5,16p,16d#5,16p,16b5,16p,16e5,16p,16e6,16p,16e6,16p,c#5,16f6,16p,16f5,16p,16f6,16p,16f#5,16p,16f#6,16p,8f#.6,16p,16b,16p,16b5,16p,16d#5,16p,16b5,16p,16e5,16p,16e6,16p,16e6,16p,c#5,16f6,16p,16f5,16p,16f6,16p,16f#5,16p,16f#6,16p,8f#.6,16p",
-        "Lotus:d=4,o=5,b=100:16c6,16c6,16c6,8a#,8c6,16a#,8g#,8c6,8g,8a#,16c6,16c6,16c6,8a#,8c6,16a#,8g#,8c6,8g,8d#6",
-        "GBusters:d=4,o=5,b=112:16b,16b,8d#6,8b,8c#6,8a,2p,16b,16b,16b,16b,8a,8b,2p,16b,16b,8d#6,8b,8c#6,8a,2p,16b,16b,16b,16b,8a,8c#6,8b",
-        "outrun_magic:d=4,o=5,b=160:f6,d#6,8g#.6,f6,d#6,8c#.6,d#6,c6,2g#.,c#6,c6,8d#.6,c#6,c6,8f.,a#,16c.6,1a#,f6,d#6,8g#.6,f6,d#6,8c#.6,d#6,c6,2g#.,c#6,c6,8d#.6,c#6,c6,16f.,16g#.,c6,2a#.",
-        "Popeye:d=4,o=5,b=140:16g.,16f.,16g.,16p,32p,16c.,16p,32p,16c.,16p,32p,16e.,16d.,16c.,16d.,16e.,16f.,g,8p,16a,16f,16a,16c6,16b,16a,16g,16a,16g,8e,16g,16g,16g,16g,8a,16b,32c6,32b,32c6,32b,32c6,32b,8c6",
-        "RainbowIslands:d=4,o=5,b=125:c,8p,c6,8p,8b.,8g,16a,8b,8c6,16p,a,8f,16g,8a,8g#.,2g,8p,16g,8f,16g,8f,16e,8d,8g,16p,e,8c,16d,8e,8f,8p,8d,16p,8e,16p,8f,16p,8f#,g",
-        "BubbleBobble:d=4,o=5,b=125:8a#6,8a6,8g.6,16f6,8a6,8g6,8f6,8d#6,8g6,8f6,16d#6,8d.6,f.6,16d6,16c6,8a#,8c6,8d6,8d#6,8c6,16d6,8d#.6,8f6,8f6,8g6,16a6,8g.6,8f6,8f6,8g6,8a6,8a#6,8a6,8g.6,16f6,8a6,8g6,8f6,8d#6,8g6,8f6,16d#6,8d.6,f.6,16d6,16c6,8a#,8c6,8d6,8d#6,8c6,16d6,8d#.6,8f6,8f6,8g6,16a6,8f.6,8a#.6",
-        "Rambo:d=4,o=5,b=125:16f#4,16f#,16c#,16b4,2c#.,16a4,b4,2f#.4,16f#4,16f#,16c#,16b4,2c#.,8f#,8e.,16f#,2e.,16f#4,16f#,16c#,16b4,2c#.,16a4,b4,2f#.4,16f#4,16f#,16c#,16e,b.4,8c#,8b.4,16a4,2b4",
-        "StreetRod:d=4,o=5,b=125:16f#4,16a#4,16b4,16c#,8f#,8f#,16p,8f#,16p,16f#4,16a#4,16b4,16c#,8f#,8f#,16p,8a,16p,16f#4,16a#4,16b4,16c#,16f#,16f#,16f#,16e,16e,16e,16d#,16d#,16d#,16d,16d,16d,8c#,8c#,16p,8c#,16p,16a#4,8b4,16a#4,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8c#,p,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8e,16p,16e,8d#,16c#,8b4,16d#,8f#,16b4,8d#,16f#,8b4,16d#,8f#,16b4,8d#,8f#,p,8f#4,16a#4,8c#,16f#4,8a#4,16c#,8f#4,16a#4,8c#,16f#4,8a#4,8e,16p,16e,8d#,16c#",
-        "BTTF:d=4,o=5,b=160:32p,p,8c.,16p,g,16p,16c.6,16p,a#.,16p,16a,16p,16g,16p,8a,16p,8g,16p,8f,16p,1g.,1p,g.,16p,c.,16p,2f#.,16p,32g.,32p,32a.,32p,8g,32p,8e,32p,8c,32p,f#,16p,32g.,32p,32a.,32p,8g.,32p,8d.,32p,8g.,32p,8d.6,32p,d6,16p,c#6,16p,32b.,32p,32c#.6,32p,2d6",
-        "Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6",
-        "A-Team:d=8,o=5,b=125:4d#6,a#,2d#6,16p,g#,4a#,4d#.,p,16g,16a#,d#6,a#,f6,2d#6,16p,c#.6,16c6,16a#,g#.,2a#",
-        "Axel-F:d=4,o=5,b=125:g,8a#.,16g,16p,16g,8c6,8g,8f,g,8d.6,16g,16p,16g,8d#6,8d6,8a#,8g,8d6,8g6,16g,16f,16p,16f,8d,8a#,2g,p,16f6,8d6,8c6,8a#,g,8a#.,16g,16p,16g,8c6,8g,8f,g,8d.6,16g,16p,16g,8d#6,8d6,8a#,8g,8d6,8g6,16g,16f,16p,16f,8d,8a#,2g",
-        "OutrunSplash:d=4,o=5,b=160:8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8d#,8a#,8d#6,8a#,8c#,8g#,8c#6,8c#,8g#,8c#6,8c#,8c#6,16c#.4,16g#.4,16c#.,16d.4,16a.4,16d.,16d#.4,16a#.4,16d#.,16e.4,16b.4,16e.,16f.4,16c.,16f.,16f#.4,16c#.,16f#.,16g.4,16d.,16g.,16g#.4,16d#.,16g#.,2c#.,8f#,32a#,b.,a#,8g#,a#,1e,32d#7,e.6,d#6,8c#6,d#6,1a#,32c6,c#6,b,2a#.,32f,16f#.,1d#,1e,32f#,32g,g#,8b,a#,g#,8f#,1d#,32f,f#,8a#,g#,1a,32c#6,d6,1c#6,8b,32c6,1c#6",
-        "OutrunBreeze:d=4,o=5,b=125:1f#,16b,16a,2g#,8a,8g#,1f#,2g#,8e,1f#,p,8a,8g#,16f#,16e,2f#,a,8b,2g#,f#,e,1f#,8a,8g#,16f#,16e,2f#,g#,8a,2b,32c6,8c#6,e6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,8a6,16g#6,16f#6,16a6,8b6,8a6,16g#6,1f#6",
-        "FlimBoq:d=4,o=5,b=160:8g,8b,8p,8d6,8p,8g6,8p,e6,8c6,8p,g,8e,8f#,8g,8f#,8g,8p,8a,8p,8d6,8p,c6,8b,8a,b,8g,8d,8f#,8g,8b,8p,8d6,8p,8g6,8p,a6,8e6,8p,c6,8g,8c6,8g6,8f#6,e6,d6,f#6,g.6",
-        "star_wars:d=16,o=5,b=100:4e,4e,4e,8c,p,g,4e,8c,p,g,4e,4p,4b,4b,4b,8c6,p,g,4d#,8c,p,g,4e,8p",
-        "mission_imp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d",
-        "mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6",
-      }
-
 api:
   encryption:
     key: !secret kitchen_timer.api.encryption
@@ -307,12 +177,15 @@ ota:
       - component.update: tm1637_display          
 
 packages:
-  debug: !include ./kitchen-timer/debug.yaml 
+  rtttl: !include ./kitchen-timer/rtttl.yaml
+  debug: !include ./kitchen-timer/debug.yaml
+  sntp: !include ./kitchen-timer/sntp.yaml
+  rotary_encoder: !include ./kitchen-timer/rotary_encoder.yaml
   wifi: !include ./kitchen-timer/wifi.yaml 
   menu: !include ./kitchen-timer/menu.yaml
   power: !include ./kitchen-timer/power.yaml
   wireguard: !include ./kitchen-timer/wireguard.yaml
-  # web_server: !include ./kitchen-timer/web_server.yaml
+  web_server: !include ./kitchen-timer/web_server.yaml
   signal1: !include
     file: ./kitchen-timer/signal.yaml
     vars:
@@ -382,63 +255,8 @@ deep_sleep:
   id: deep_sleep_component
   run_duration: 1000ms
   sleep_duration: 5000ms
-
-
-
-time:
-  - platform: sntp
-    id: sntp_component
-    timezone: ${timezone}
-    update_interval: 5min
-    servers: 
-      - 0.pool.ntp.org
-      # - 1.pool.ntp.org
-      # - 2.pool.ntp.org
-      # - 192.168.2.1
-      - 224.0.1.1
-      - 192.168.1.1
-    on_time_sync:
-      then:
-      - component.update: sntp_start_time_sensor
-      - component.update: sntp_sync_time_sensor
-      - component.update: sntp_sync_try_time_sensor
-      - component.update: sntp_correction_abs_total
-      - component.update: sntp_correction_total
-      - component.update: sntp_uptime
-      - component.update: sntp_sync_count
-      - component.update: sntp_avg_correction
-      - component.update: sntp_behind
-      - logger.log: 
-          level: INFO
-          format: "SNTP Synchronized"
-
+  
 switch:
-  - platform: template
-    name: SNTP Immediate Update
-    entity_category: CONFIG
-    restore_mode: RESTORE_DEFAULT_ON
-    lambda: |
-      if(!esp_sntp_enabled()) return {};
-      return sntp_get_sync_mode() == SNTP_SYNC_MODE_IMMED;
-    turn_on_action: 
-      then:
-        lambda: |
-          if(!esp_sntp_enabled()) return;
-          sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
-    turn_off_action: 
-      then:
-        lambda: |
-          if(!esp_sntp_enabled()) return;
-          sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
-  - platform: gpio
-    id: power_saving
-    restore_mode: ALWAYS_ON
-    name: Power Saving
-    internal: True
-    entity_category: CONFIG
-    pin:
-      number: ${power_sawing_pin}
-      inverted: True
   - platform: template
     optimistic: True
     name: Display Flip
@@ -475,71 +293,16 @@ switch:
     restore_mode: RESTORE_DEFAULT_ON
   - platform: template
     id: online_on_battery
-    name: Battery Stay online
+    name: Server on Battery
     optimistic: True
     entity_category: CONFIG
     restore_mode: RESTORE_DEFAULT_OFF
- 
-output:
-  - platform: ledc
-    id: rtttl_out
-    pin:
-      number: ${passive_buzzer_pin}
-      inverted: False
-      mode:
-        open_drain: True
-        output: True
-
-rtttl:
-  output: rtttl_out
-  id: my_rtttl
 
 i2c:
   - sda: $sda_pin
     scl: $scl_pin
 
 script:
-  - id: encoder_clicks_loop
-    mode: single
-    then:
-      while:
-        condition: 
-          lambda: return true;
-        then:
-          - delay: 5ms              
-          - if:
-              condition: 
-                and:
-                  - lambda: return id(encoder_clicks_to_play) > 0;
-                  - not: 
-                      - rtttl.is_playing
-              then:
-                - lambda: |
-                    --id(encoder_clicks_to_play);
-                - if:
-                    condition:
-                      or:
-                        - script.is_running: deep_sleep_start
-                        - switch.is_off: sound_menu_switch
-                    then:
-                      - delay: 2ms
-                    else:
-                      - output.set_level:
-                          id: rtttl_out
-                          level: "100%"
-                      - delay: 1ms
-                      - output.set_level:
-                          id: rtttl_out
-                          level: "0%"
-                      - delay: 1ms
-  - id: sntp_update_interval_setup
-    mode: restart
-    then: 
-      - lambda: |
-          const auto& value = id(ac_powered).state ? id(sntp_ac_interval) : id(sntp_battery_interval);
-          id(sntp_component).set_update_interval(isnan(value) 
-            ? 4294967295UL // Found in main.cpp. Magic never value?
-            : uint32_t(value*1e3f));
   - id: deep_sleep_start
     mode: single
     then:
@@ -668,56 +431,6 @@ script:
                   - output.set_level:
                       id: rtttl_out
                       level: "0%"
-                  
-  - id: auto_menu_exit
-    mode: restart
-    then:
-      - wait_until:
-          condition:
-            - lambda: return id(menu_exit_request);
-          timeout: 60s
-      - globals.set: 
-          id: menu_exit_request
-          value: "false"
-      - display_menu.hide:
-  - id: sntp_updater_loop
-    then:
-      - while:
-          condition:
-            - lambda: return true;
-          then:
-            - if:
-                condition: 
-                  - or:
-                      - not:
-                          - time.has_time:
-                      - lambda: |
-                          const auto& interval = id(ac_powered) ? id(sntp_ac_interval) : id(sntp_battery_interval);
-                          if(isnan(interval))
-                            return false;
-                          time_t now;
-                          ::time(&now);
-                          return now - kitchen_timer::sntp::sync_try_time > time_t(interval) + id(sntp_component).get_update_interval() + 20;
-                then:
-                  - lambda: |
-                      kitchen_timer::sntp::force_sync_scheduled = true;
-                  - component.update: sntp_component
-            - wait_until:
-                condition:
-                  - lambda: return !kitchen_timer::sntp::force_sync_scheduled;
-                timeout: !lambda |
-                  return id(sntp_battery_sync_timeout).state * 1000;
-            - if:
-                condition:
-                  - time.has_time:
-                then: 
-                  - lambda: |
-                      if(kitchen_timer::sntp::force_sync_scheduled) {
-                        kitchen_timer::sntp::force_sync_scheduled = false;
-                        ::time(&kitchen_timer::sntp::sync_try_time);
-                      }
-            - delay: 1s
-
   - id: update_display_loop
     then:
       - while:
@@ -834,18 +547,9 @@ script:
                       // adc_power_off();
                       // id(tm1637_display).stop_poller();
                       // ESP_LOGD(TAG, "Starting light sleep");
-                      esp_task_wdt_delete(nullptr);
                       result = esp_light_sleep_start();
-                      #if ESP_IDF_VERSION_MAJOR >= 5
-                      esp_task_wdt_config_t wdtc;
-                      wdtc.idle_core_mask = 0;
-                      wdtc.timeout_ms = 1500;
-                      wdtc.trigger_panic = false;
-                      esp_task_wdt_reconfigure(&wdtc);
-                      #else
-                      esp_task_wdt_init(1500, false);
-                      #endif
-
+                      esp_task_wdt_reset();
+                      
                       for(const auto& gpio: wake_pins) {
                         const auto result = gpio_wakeup_disable(gpio);
                         if(ESP_OK != result) {
@@ -1023,176 +727,6 @@ sensor:
   #     if(ESP_OK != esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_RTC_SLOW, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &result))
   #       return NAN;
   #     return result;
-  - platform: template
-    name: SNTP Sync interval
-    entity_category: DIAGNOSTIC
-    update_interval: 5s
-    device_class: duration
-    unit_of_measurement: s
-    lambda: return 0.001f*sntp_get_sync_interval();
-  - platform: template
-    name: SNTP Behind
-    id: sntp_behind
-    update_interval: never
-    accuracy_decimals: 3
-    device_class: duration
-    entity_category: diagnostic
-    unit_of_measurement: ms
-    lambda: |
-      return kitchen_timer::sntp::has_behind_us 
-        ? 0.001f /* us/ms */ * kitchen_timer::sntp::behind_us /* us */
-        : NAN;
-  - platform: template
-    id: sntp_start_time_sensor
-    name: SNTP Start
-    entity_category: DIAGNOSTIC
-    device_class: timestamp
-    update_interval: never
-    lambda: |
-      if(kitchen_timer::sntp::first_sync_time)
-        return kitchen_timer::sntp::first_sync_time;
-      return NAN;
-  - platform: template
-    id: sntp_sync_time_sensor
-    name: SNTP Sync
-    entity_category: DIAGNOSTIC
-    device_class: timestamp
-    update_interval: never
-    lambda: |
-      if(kitchen_timer::sntp::prev_sync.tv_sec)
-        return kitchen_timer::sntp::prev_sync.tv_sec;
-      return NAN;
-  - platform: template
-    id: sntp_sync_try_time_sensor
-    name: SNTP Try Sync
-    entity_category: DIAGNOSTIC
-    device_class: timestamp
-    update_interval: never
-    lambda: |
-      return kitchen_timer::sntp::sync_try_time;
-  - platform: template
-    id: sntp_correction_abs_total
-    name: SNTP Absolute Correction Total
-    entity_category: diagnostic
-    accuracy_decimals: 3
-    unit_of_measurement: ms
-    state_class: total_increasing
-    update_interval: never
-    lambda: |
-      return float(kitchen_timer::sntp::correction_us_abs_total)/1000.0f;
-  - platform: template
-    id: sntp_correction_total
-    name: SNTP Correction Total
-    entity_category: diagnostic
-    accuracy_decimals: 3
-    unit_of_measurement: ms
-    state_class: total
-    update_interval: never
-    lambda: |
-      return float(kitchen_timer::sntp::correction_us_total)/1000.0f;
-  - platform: template
-    id: sntp_uptime
-    entity_category: diagnostic
-    name: SNTP Uptime
-    accuracy_decimals: 0
-    unit_of_measurement: s
-    device_class: duration
-    state_class: total_increasing
-    update_interval: never
-    lambda: |
-      return kitchen_timer::sntp::first_sync_time == 0 
-        ? NAN
-        : float(kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time);
-  - platform: template
-    id: sntp_sync_count
-    entity_category: diagnostic
-    name: SNTP Sync calls
-    accuracy_decimals: 0
-    state_class: total_increasing
-    update_interval: never
-    unit_of_measurement: '#'
-    lambda: |
-      return kitchen_timer::sntp::sync_count;
-  - platform: template
-    id: sntp_avg_correction
-    entity_category: diagnostic
-    name: SNTP Average Correction
-    accuracy_decimals: 2
-    unit_of_measurement: s/day
-    state_class: measurement
-    update_interval: never
-    lambda: |
-      if(kitchen_timer::sntp::first_sync_time == 0)
-        return NAN;
-      const auto uptime = kitchen_timer::sntp::prev_sync.tv_sec - kitchen_timer::sntp::first_sync_time;
-      if(uptime == 0)
-        return NAN;
-      return float(kitchen_timer::sntp::correction_us_total) /* us */ * 1e-6f /*s/us*/ / float(uptime) /* s */ * 60.f /* s/m */ * 60.f /* m/h */ * 24.f /* h/d */;
-  - platform: debug
-    free:
-      name: "Heap Free"
-    # fragmentation:
-    #   name: "Heap Fragmentation"
-    block:
-      name: "Heap Max Block"
-    loop_time:
-      name: "Loop Time"
-  - platform: rotary_encoder
-    id: encoder
-    name: Encoder Position
-    internal: True
-    pin_a:
-      inverted: True
-      number: ${rotary_encoder_a_pin}
-      mode: 
-        input: True
-        pullup: True
-    pin_b:
-      inverted: True
-      number: ${rotary_encoder_b_pin}
-      mode: 
-        input: True
-        pullup: True
-    on_anticlockwise:
-      - if: 
-          condition:
-            - script.is_running: play_signal
-          then:
-            # - globals.set: 
-            #     id: signal_stop_request
-            #     value: !lambda return true;
-          else:
-            - script.execute: auto_menu_exit
-            - if:
-                condition:
-                  display_menu.is_active:
-                then:
-                  - display_menu.down:
-                else:
-                  - display_menu.show_main:
-                  - display_menu.down:
-    on_clockwise:
-      - if: 
-          condition:
-            - script.is_running: play_signal
-          else:
-            - script.execute: auto_menu_exit
-            - if:
-                condition:
-                  display_menu.is_active:
-                then:
-                  - display_menu.up:
-                else:
-                  - display_menu.show_main:
-                  - display_menu.down:
-    on_value:
-      - globals.set: 
-          id: sleep_back
-          value: "false"
-      - lambda: |
-          if(id(encoder_clicks_to_play) < 32)
-            id(encoder_clicks_to_play)++;
-
   - platform: veml7700
     id: light_sensor
     address: 0x10
@@ -1203,11 +737,11 @@ sensor:
       id: ambient_light_sensor_fast
       name: Light Ambient Fast
       internal: True
-    ambient_light_counts: 
-      name: Light Ambient Counts
-      entity_category: diagnostic
-      filters:
-        - throttle: 5s
+    # ambient_light_counts: 
+    #   name: Light Ambient Counts
+    #   entity_category: diagnostic
+    #   filters:
+    #     - throttle: 5s
 
     infrared:
       name: Light Infrared
@@ -1219,21 +753,21 @@ sensor:
       entity_category: diagnostic
       filters:
         - throttle: 5s
-    full_spectrum_counts: 
-      name: Light Full Spectrum Counts
-      entity_category: diagnostic
-      filters:
-        - throttle: 5s
-    actual_integration_time:
-      name: Light Integration Time
-      entity_category: diagnostic
-      filters:
-        - throttle: 5s
-    actual_gain:
-      name: Light Gain
-      entity_category: diagnostic
-      filters:
-        - throttle: 5s
+    # full_spectrum_counts: 
+    #   name: Light Full Spectrum Counts
+    #   entity_category: diagnostic
+    #   filters:
+    #     - throttle: 5s
+    # actual_integration_time:
+    #   name: Light Integration Time
+    #   entity_category: diagnostic
+    #   filters:
+    #     - throttle: 5s
+    # actual_gain:
+    #   name: Light Gain
+    #   entity_category: diagnostic
+    #   filters:
+    #     - throttle: 5s
 
   - platform: copy
     name: Light Ambient
@@ -1272,217 +806,7 @@ sensor:
                   id: display_intensity_number
                   value: !lambda return x;
 
-  - platform: adc
-    pin: ${battery_voltage_pin}
-    attenuation: 12db
-    accuracy_decimals: 4
-    update_interval: 1s
-    id: battery_voltage_unfiltered
-    name: Divider Voltage Unfiltered
-    entity_category: diagnostic
-    internal: True
-    filters:
-      - lambda: |
-          auto value = x*1.89764693-0.09737394839;
-          // if(id(charging_sensor).state)
-          //   value -= 0.15;
-          return value;
-  - platform: copy
-    source_id: battery_voltage_unfiltered
-    id: battery_voltage
-    name: Battery Voltage
-    accuracy_decimals: 4
-    entity_category: diagnostic
-    filters:
-      - lambda: |
-          if(id(charging_sensor).state)
-            return NAN;
-          return x;
-      - exponential_moving_average:
-          alpha: 0.1
-          send_every: 5
-  - platform: copy
-    source_id: battery_voltage_unfiltered
-    id: charging_voltage
-    name: Battery Charging Voltage
-    accuracy_decimals: 4
-    entity_category: diagnostic
-    filters:
-      - lambda: |
-          if(!id(charging_sensor).state)
-            return NAN;
-          return x;
-      - exponential_moving_average:
-          alpha: 0.1
-          send_every: 5
-    on_value: 
-      then:
-        - component.update: battery_percentage_charging
-  - platform: template
-    id: battery_percentage_charging
-    update_interval: never
-    internal: True
-    lambda: |
-      const auto& voltage = id(charging_voltage).state;
-      const auto& current = id(charging_current).state;
-      auto by_voltage1=[&]{
-        return (((1.012798E+00f * voltage - 1.428660E+01f) * voltage + 7.558094E+01f) * voltage - 1.776824E+02f) * voltage + 1.565834E+02f;
-      };
-      auto by_voltage2=[&]{
-        return 1.297578E+00f * voltage - 5.037708E+00f;
-      };
-      auto by_current = [&]{
-        return (((-2.434210E-12f * current + 5.696992E-09f) * current - 4.372896E-06f) * current + 6.284777E-04f) * current + 9.910878E-01f;
-      };
-      if(isnan(voltage) && isnan(current)) return NAN;
-      if(isnan(voltage)) return by_current();
-
-      const auto result = by_voltage2();
-      return result < 0.1f 
-        ? max(result, by_voltage1()) 
-        : result > 0.4 
-          ? max(result, by_current()) 
-          : result;
-    filters:
-      - multiply: 100
-    on_value: 
-      then:
-        - component.update: battery_percentage
-  - platform: copy
-    id: battery_percentage_discharging
-    source_id: battery_voltage
-    internal: True
-    filters:
-      - calibrate_linear:
-          method: exact
-          datapoints:
-            - 2.44 -> 0.0
-            - 2.45 -> 0.01
-            - 2.48 -> 0.02
-            - 2.54 -> 0.06
-            - 2.65 -> 0.11
-            - 2.75 -> 0.18
-            - 2.86 -> 0.31
-            - 2.975 -> 0.6
-            - 3.023 -> 0.79
-            - 3.123 -> 1.29
-            - 3.25 -> 2.26
-            - 3.372 -> 3.87
-            - 3.439 -> 5.44
-            - 3.462 -> 7.01
-            - 3.833 -> 39.42
-            - 3.922 -> 57.1
-            - 4.032 -> 72.4
-            - 4.153 -> 97.53
-            - 4.2 -> 100.
-    on_value: 
-      then:
-        - component.update: battery_percentage
-  - platform: template
-    id: battery_percentage
-    name: Battery
-    device_class: battery
-    unit_of_measurement: "%"
-    update_interval: never
-    lambda: |
-      return id(charging_sensor).state 
-        ? id(battery_percentage_charging).state 
-        : id(battery_percentage_discharging).state;
-    filters:
-      - clamp: 
-          max_value: 100
-          min_value: 0
-      - lambda: |
-          if(!isnan(x))
-            kitchen_timer::last_battery_percentage = x;
-          return x;
-
-  - platform: adc
-    name: Battery Charging Current
-    pin: 
-      number: ${charging_current_pin}
-      mode:
-        input: true
-    device_class: current
-    entity_category: DIAGNOSTIC
-    id: charging_current
-    attenuation: auto
-    unit_of_measurement: mA
-    update_interval: 5s
-    filters:
-      - lambda: |
-            return id(charging_sensor).state ? x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/ : NAN;
-    on_value: 
-      then:
-        - component.update: battery_percentage_charging
-
-binary_sensor:
-  - platform: template
-    name: SNTP Enabled
-    entity_category: DIAGNOSTIC
-    lambda: return esp_sntp_enabled();
-    publish_initial_state: True
-    
-  - platform: gpio
-    id: encoder_button
-    name: Encoder Button
-    internal: True
-    pin:
-      number: ${rotary_encoder_button_pin}
-      inverted: True
-      mode: 
-        input: True
-        pullup: True
-    on_press:
-      - lambda: |
-          id(encoder_button_press_timestamp) = millis();
-      - component.update: tm1637_display  
-    on_click:
-      - globals.set: 
-          id: sleep_back
-          value: "false"
-      - if: 
-          condition:
-            - script.is_running: play_signal
-          then:
-            - globals.set: 
-                id: signal_stop_request
-                value: !lambda return true;
-          else:
-            - script.execute: auto_menu_exit
-            - if:
-                condition:
-                  display_menu.is_active:
-                then:
-                  - display_menu.enter:
-                else:
-                  - display_menu.show_main:
-    
-  - platform: gpio
-    name: Power Charging
-    id: charging_sensor
-    entity_category: DIAGNOSTIC
-    pin:
-      number: ${charging_pin}
-      inverted: True
-      mode:
-        input: True
-        pullup: True
-    on_state: 
-      then:
-        - component.update: battery_percentage
-  - platform: gpio
-    name: Power Fully Charged
-    id: fully_charged
-    entity_category: DIAGNOSTIC
-    pin:
-      number: ${fully_charged_pin}
-      inverted: True
-      mode:
-        input: True
-        pullup: True
-  
-        
+binary_sensor:      
   - platform: template
     id: wifi_required
     lambda: |
@@ -1493,60 +817,7 @@ binary_sensor:
     on_release: 
       then:
         - wifi.disable:
-          
 
-text_sensor:
-  - platform: template
-    name: SNTP IP 1
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      auto&& ret = esp_sntp_getserver(0);
-      if(ret)
-        return esphome::network::IPAddress(ret).str();
-      return {};
-  - platform: template
-    name: SNTP IP 2
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      auto&& ret = esp_sntp_getserver(1);
-      if(ret)
-        return esphome::network::IPAddress(ret).str();
-      return {};
-  - platform: template
-    name: SNTP IP 3
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      auto&& ret = esp_sntp_getserver(2);
-      if(ret)
-        return esphome::network::IPAddress(ret).str();
-      return {};
-  - platform: template
-    name: SNTP Server 1
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      auto&& ret = esp_sntp_getservername(0);
-      if(ret) return {ret};
-      return {};
-  - platform: template
-    name: SNTP Server 2
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      auto&& ret = esp_sntp_getservername(1);
-      if(ret) return {ret};
-      return {};
-  - platform: template
-    name: SNTP Server 3
-    update_interval: 5s
-    entity_category: DIAGNOSTIC
-    lambda: |
-      auto&& ret = esp_sntp_getservername(2);
-      if(ret) return {ret};
-      return {};
 button:
   - platform: restart
     name: Restart device
@@ -1557,17 +828,12 @@ button:
     on_press:
       then:
         - script.execute: deep_sleep_start
-  - platform: template
-    name: SNTP Sync now
-    entity_category: config
-    on_press:
-      then:
-        - component.update: sntp_component
+
 number:
   - platform: template
     id: alarm_timeout
     name: Alarm Timeout
-    entity_category: CONFIG
+    entity_category: config
     min_value: 1
     max_value: 15
     step: 1
@@ -1575,66 +841,7 @@ number:
     optimistic: True
     restore_value: True
     initial_value: 5
-  - platform: template
-    name: SNTP AC Sync Interval
-    lambda: return id(sntp_ac_interval)/60.f;
-    unit_of_measurement: min
-    min_value: 0
-    max_value: 10080 # week
-    step: 1
-    entity_category: CONFIG
-    device_class: duration
-    set_action: 
-      then:
-        - globals.set: 
-            id: sntp_ac_interval
-            value: !lambda |
-              return 60.f*(x > 10079.0f ? NAN : x)*60.f;
-        - script.execute: sntp_update_interval_setup
-  - platform: template
-    name: SNTP Battery Sync Interval
-    lambda: return id(sntp_battery_interval)/60.f;
-    unit_of_measurement: min
-    min_value: 0
-    max_value: 10080 # week
-    step: 1
-    entity_category: CONFIG
-    device_class: duration
-    set_action: 
-      then:
-        - globals.set: 
-            id: sntp_battery_interval
-            value: !lambda |
-              return (x > 10079.0f ? NAN : x)*60.f;
-        - script.execute: sntp_update_interval_setup
-  - platform: template
-    id: sntp_battery_sync_timeout
-    name: SNTP Battery Sync Timeout
-    optimistic: true
-    unit_of_measurement: s
-    min_value: 15
-    max_value: 120
-    step: 1
-    entity_category: CONFIG
-    device_class: duration
-  - platform: template
-    id: sntp_sync_interval_hours
-    name: SNTP Sync Interval
-    entity_category: CONFIG
-    min_value: 0
-    max_value: 48
-    step: 0.01
-    device_class: duration
-    restore_value: True
-    optimistic: True
-    initial_value: 1
-    unit_of_measurement: hour
-    # lambda: |
-    #   return id(sntp_component).get_update_interval()/1000.f/60.f/60.f;
-    set_action: 
-      then:
-        - lambda: |
-            id(sntp_component).set_update_interval(1000.f /* ms/s */ * 60.f /* s/m */ *60.f /* m/h */ * x /* h */ );
+
   - platform: template
     name: Display Intensity
     entity_category: CONFIG
@@ -1667,27 +874,15 @@ number:
             id(tm1637_display).set_on(int(x) != -1);
             id(tm1637_display).set_intensity(max(0, int(x)));
             id(tm1637_display).update();
-  - platform: template
-    name: Sound Gain
-    max_value: 1.0
-    min_value: 0.1
-    step: 0.01
-    entity_category: CONFIG
-    optimistic: True
-    restore_value: True
-    initial_value: 0.6
-    on_value:
-      then:
-        - lambda: |
-            id(my_rtttl).set_gain(x);
 
 lcd_menu_7segment:
   items:
-    - id: !extend menu_item_battery_menu
-      items:
-        - type: back
-          id: menu_item_battery_back
-          text: $menu_text_back
+    - text: $menu_text_back
+      type: command
+      on_value:
+        then:
+          - display_menu.hide:
+          - component.update: tm1637_display
 display:
   platform: tm1637
   id: tm1637_display

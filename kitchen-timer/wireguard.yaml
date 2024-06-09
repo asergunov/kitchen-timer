@@ -80,21 +80,19 @@ script:
 
 lcd_menu_7segment:
   items:
-    - id: !extend menu_item_battery_menu
-      items:
-        - text: WrGr
-          type: select
-          select: wireguard_select
-          value_lambda: |
-            const auto& index = id(wireguard_select).active_index();
-            if(index.has_value()) {
-              switch(index.value()) {
-                case 0:
-                  return "ЗАПР";
-                case 1:
-                  return "СЕТЬ";
-                case 2:
-                  return "ВСЕГ";
-              }
-            }
-            return "----";
+    - text: WrGr
+      type: select
+      select: wireguard_select
+      value_lambda: |
+        const auto& index = id(wireguard_select).active_index();
+        if(index.has_value()) {
+          switch(index.value()) {
+            case 0:
+              return "ЗАПР";
+            case 1:
+              return "СЕТЬ";
+            case 2:
+              return "ВСЕГ";
+          }
+        }
+        return "----";

@@ -1,0 +1,165 @@
+globals:
+  - id: encoder_clicks_to_play
+    type: uint8_t
+    initial_value: "0"
+  - id: encoder_button_press_timestamp
+    type: uint32_t
+    initial_value: "millis()"
+
+esphome:
+  on_boot:
+    then:
+      - script.execute: encoder_clicks_loop
+  on_loop: 
+    then:
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: encoder_button
+              - lambda: |
+                  const auto delta = millis() - id(encoder_button_press_timestamp);
+                  return delta > 1000;
+          then:
+            - lambda: |
+                id(encoder_button_press_timestamp) = millis();
+            - if:
+                condition:
+                  - display_menu.is_active:
+                then:
+                  - display_menu.hide:
+                  - component.update: tm1637_display
+                else:
+                  - script.execute: deep_sleep_start   
+
+sensor:
+  - platform: template
+    name: Debug Encoder clicks to play
+    lambda: return id(encoder_clicks_to_play);
+    update_interval: 5s
+    entity_category: diagnostic
+  - platform: rotary_encoder
+    id: encoder
+    name: Encoder Position
+    internal: True
+    pin_a:
+      inverted: True
+      number: ${rotary_encoder_a_pin}
+      mode: 
+        input: True
+        pullup: True
+    pin_b:
+      inverted: True
+      number: ${rotary_encoder_b_pin}
+      mode: 
+        input: True
+        pullup: True
+    on_anticlockwise:
+      - if: 
+          condition:
+            - script.is_running: play_signal
+          then:
+            # - globals.set: 
+            #     id: signal_stop_request
+            #     value: !lambda return true;
+          else:
+            - script.execute: auto_menu_exit
+            - if:
+                condition:
+                  display_menu.is_active:
+                then:
+                  - display_menu.down:
+                else:
+                  - display_menu.show_main:
+                  - display_menu.down:
+    on_clockwise:
+      - if: 
+          condition:
+            - script.is_running: play_signal
+          else:
+            - script.execute: auto_menu_exit
+            - if:
+                condition:
+                  display_menu.is_active:
+                then:
+                  - display_menu.up:
+                else:
+                  - display_menu.show_main:
+                  - display_menu.down:
+    on_value:
+      - globals.set: 
+          id: sleep_back
+          value: "false"
+      - lambda: |
+          if(id(encoder_clicks_to_play) < 32)
+            id(encoder_clicks_to_play)++;
+
+binary_sensor:
+  - platform: gpio
+    id: encoder_button
+    name: Encoder Button
+    internal: True
+    pin:
+      number: ${rotary_encoder_button_pin}
+      inverted: True
+      mode: 
+        input: True
+        pullup: True
+    on_press:
+      - lambda: |
+          id(encoder_button_press_timestamp) = millis();
+      - component.update: tm1637_display  
+    on_click:
+      - globals.set: 
+          id: sleep_back
+          value: "false"
+      - if: 
+          condition:
+            - script.is_running: play_signal
+          then:
+            - globals.set: 
+                id: signal_stop_request
+                value: !lambda return true;
+          else:
+            - script.execute: auto_menu_exit
+            - if:
+                condition:
+                  display_menu.is_active:
+                then:
+                  - display_menu.enter:
+                else:
+                  - display_menu.show_main:
+
+script:
+  - id: encoder_clicks_loop
+    mode: single
+    then:
+      while:
+        condition: 
+          lambda: return true;
+        then:
+          - delay: 5ms              
+          - if:
+              condition: 
+                - lambda: return id(encoder_clicks_to_play) > 0;
+              then:
+                - lambda: |
+                    --id(encoder_clicks_to_play);
+                - if:
+                    condition:
+                      or:
+                        # - script.is_running: deep_sleep_start
+                        - switch.is_off: sound_menu_switch
+                        - rtttl.is_playing:
+                    then:
+                      - delay: 2ms
+                    else:
+                      - output.set_level:
+                          id: rtttl_out
+                          level: "100%"
+                      - output.turn_on: rtttl_out
+                      - delay: 1ms
+                      - output.turn_off: rtttl_out
+                      - output.set_level:
+                          id: rtttl_out
+                          level: "0%"
+                      - delay: 1ms

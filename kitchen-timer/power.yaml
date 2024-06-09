@@ -1,7 +1,188 @@
+switch:
+  - platform: gpio
+    id: power_saving
+    restore_mode: ALWAYS_ON
+    name: Power Saving
+    internal: True
+    entity_category: CONFIG
+    pin:
+      number: ${power_sawing_pin}
+      inverted: True
+sensor:
+
+  - platform: adc
+    pin: ${battery_voltage_pin}
+    attenuation: 12db
+    accuracy_decimals: 4
+    update_interval: 1s
+    id: battery_voltage_unfiltered
+    name: Divider Voltage Unfiltered
+    entity_category: diagnostic
+    internal: True
+    filters:
+      - lambda: |
+          auto value = x*1.89764693-0.09737394839;
+          // if(id(charging_sensor).state)
+          //   value -= 0.15;
+          return value;
+  - platform: copy
+    source_id: battery_voltage_unfiltered
+    id: battery_voltage
+    name: Battery Voltage
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    filters:
+      - lambda: |
+          if(id(charging_sensor).state)
+            return NAN;
+          return x;
+      - exponential_moving_average:
+          alpha: 0.1
+          send_every: 5
+  - platform: copy
+    source_id: battery_voltage_unfiltered
+    id: charging_voltage
+    name: Battery Charging Voltage
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    filters:
+      - lambda: |
+          if(!id(charging_sensor).state)
+            return NAN;
+          return x;
+      - exponential_moving_average:
+          alpha: 0.1
+          send_every: 5
+    on_value: 
+      then:
+        - component.update: battery_percentage_charging
+  - platform: template
+    id: battery_percentage_charging
+    update_interval: never
+    internal: True
+    lambda: |
+      const auto& voltage = id(charging_voltage).state;
+      const auto& current = id(charging_current).state;
+      auto by_voltage1=[&]{
+        return (((1.012798E+00f * voltage - 1.428660E+01f) * voltage + 7.558094E+01f) * voltage - 1.776824E+02f) * voltage + 1.565834E+02f;
+      };
+      auto by_voltage2=[&]{
+        return 1.297578E+00f * voltage - 5.037708E+00f;
+      };
+      auto by_current = [&]{
+        return (((-2.434210E-12f * current + 5.696992E-09f) * current - 4.372896E-06f) * current + 6.284777E-04f) * current + 9.910878E-01f;
+      };
+      if(isnan(voltage) && isnan(current)) return NAN;
+      if(isnan(voltage)) return by_current();
+
+      const auto result = by_voltage2();
+      return result < 0.1f 
+        ? max(result, by_voltage1()) 
+        : result > 0.4 
+          ? max(result, by_current()) 
+          : result;
+    filters:
+      - multiply: 100
+    on_value: 
+      then:
+        - component.update: battery_percentage
+  - platform: copy
+    id: battery_percentage_discharging
+    source_id: battery_voltage
+    internal: True
+    filters:
+      - calibrate_linear:
+          method: exact
+          datapoints:
+            - 2.44 -> 0.0
+            - 2.45 -> 0.01
+            - 2.48 -> 0.02
+            - 2.54 -> 0.06
+            - 2.65 -> 0.11
+            - 2.75 -> 0.18
+            - 2.86 -> 0.31
+            - 2.975 -> 0.6
+            - 3.023 -> 0.79
+            - 3.123 -> 1.29
+            - 3.25 -> 2.26
+            - 3.372 -> 3.87
+            - 3.439 -> 5.44
+            - 3.462 -> 7.01
+            - 3.833 -> 39.42
+            - 3.922 -> 57.1
+            - 4.032 -> 72.4
+            - 4.153 -> 97.53
+            - 4.2 -> 100.
+    on_value: 
+      then:
+        - component.update: battery_percentage
+  - platform: template
+    id: battery_percentage
+    name: Battery
+    device_class: battery
+    unit_of_measurement: "%"
+    update_interval: never
+    lambda: |
+      return id(charging_sensor).state 
+        ? id(battery_percentage_charging).state 
+        : id(battery_percentage_discharging).state;
+    filters:
+      - clamp: 
+          max_value: 100
+          min_value: 0
+      - lambda: |
+          if(!isnan(x))
+            kitchen_timer::last_battery_percentage = x;
+          return x;
+
+  - platform: adc
+    name: Battery Charging Current
+    pin: 
+      number: ${charging_current_pin}
+      mode:
+        input: true
+    device_class: current
+    entity_category: DIAGNOSTIC
+    id: charging_current
+    attenuation: auto
+    unit_of_measurement: mA
+    update_interval: 5s
+    filters:
+      - lambda: |
+            return id(charging_sensor).state ? x / 1000 /*Ohm*/ * 1200 * 1000 /*mA/A*/ : NAN;
+    on_value: 
+      then:
+        - component.update: battery_percentage_charging
+
 binary_sensor:
+  - platform: gpio
+    name: Power Charging
+    id: charging_sensor
+    entity_category: DIAGNOSTIC
+    pin:
+      number: ${charging_pin}
+      inverted: True
+      mode:
+        input: True
+        pullup: True
+    on_state: 
+      then:
+        - component.update: battery_percentage
+  - platform: gpio
+    name: Power Fully Charged
+    id: fully_charged
+    entity_category: DIAGNOSTIC
+    pin:
+      number: ${fully_charged_pin}
+      inverted: True
+      mode:
+        input: True
+        pullup: True
+  
   - platform: template
     name: Power AC
     id: ac_powered
+    internal: True
     entity_category: DIAGNOSTIC
     lambda: |
       return id(fully_charged).state || id(charging_sensor).state;

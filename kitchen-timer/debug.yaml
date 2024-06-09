@@ -21,3 +21,21 @@ sensor:
       name: "Debug Loop Time"
       # psram:
       #   name: "Debug Free PSRAM"
+
+
+# Enable logging
+logger:
+  level: INFO
+  logs:
+    esp-idf: WARN
+    web_server_idf: ERROR # Suppress warnings
+    component: ERROR # Suppress long update messages
+  
+  # level: DEBUG
+  # logs:
+  #   # kitchen-timer: INFO
+  #   main: INFO
+  #   number: INFO
+  #   timer: INFO
+  #   text: INFO
+  #   sensor: INFO
