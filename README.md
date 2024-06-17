@@ -7,7 +7,7 @@
  * tm1637 display
  * Rotary encoder with button
  * TPS63021 buck-boost converter module
- * 32KHz oscilator
+ * 32KHz crystal
  * 1S BOM module USB
  * 1500mAh battery
  * Passive buzzer
