@@ -22,10 +22,6 @@ esp32:
       CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP: y
 
 external_components:
-  - source: "github://asergunov/esphome_esphome@rtttl_pm"
-    components:
-      - rtttl
-    refresh: 0s
   - source: "github://asergunov/esphome_esphome@7digits_display_menu"
     components:
       - tm1637
@@ -36,10 +32,6 @@ external_components:
     components:
       - template
     refresh: 0s
-  # - source: "github://asergunov/esphome_esphome@deep_sleep"
-  #   components:
-  #     - deep_sleep
-  #   refresh: 0s
   - source: ./components
     components:
       - daily_signal
