@@ -60,9 +60,13 @@ I run out of pins so reused the USB pins. So don't touch encoder while flashing.
 
 ### TPS63021 buck-boost converter module
 
+Configure it for 3.3v output. Maybe add extra output capacitor.
+
 We use it in power safe mode most of the time. For flashing and while it's WiFi connected it's in normal mode
 
 * PS - GPIO20
+* OUT - 3.3v
+* GND - GND
 
 ### VEML7700 light sensor
 
