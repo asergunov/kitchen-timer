@@ -16,6 +16,10 @@
 
 ## Schematics
 
+### ESP32c3 Super Mini
+
+Modifyed by removing power LED and soldered wires on GPIO18, GPIO19 (USB data).
+
 ### RTC Clock
 
 The 32768Hz external crystal is used for precise timekeeping. It's connected to GPIO0 and GPIO1 pins. Mine works fine standalone without any resistors and capacitors.
