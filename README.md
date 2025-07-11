@@ -115,6 +115,15 @@ Once data exported I found out charge percentage by remain time.
 
 Aproximated the `discharge_percentage(battery_voltage)` and `charge_percentage(battery_volatage, charge_current)` functions in linear intervals.
 
+The discharge curve I've seen was almost linear in first 90% then goes down really fast.
+
+The charging there is two phases:
+
+1. Current limited charging. When it decreases voltage in time by current limit you set.
+2. Constant voltage charging. When it keeps the voltage the same but tracking current. Once the current is less then it's threshhold it stops charging.
+
+So first half of charging percntage depends on voltage, second part of charging percentage depends on current.
+
 ## Minimize power consmption in sleep mode
 
 I was using the Nordic Power Profiler Kit II.
