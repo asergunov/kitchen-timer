@@ -18,7 +18,23 @@
 
 ### ESP32c3 Super Mini
 
-Modifyed by removing power LED and soldered wires on GPIO18, GPIO19 (USB data).
+Made few modifications on dev board:
+
+* removed the power LED. Crashed it carefully with screw driver, checked it doesn't have any resistace or continuity.
+* soldered wires on GPIO18, GPIO19 (USB data). Not to pins itself but to resistors connected to these pins. Dirty.
+
+### Pinout conciderations
+
+Anything working in deep sleep should be in RTC domain:
+
+* Fixed pins GPIO0 GPIO1 for external RTC clock crystal
+* Rotary encder button to wake it up
+* Charge in progress and Charge Done sensors
+
+ADC1 pins (because ADC2 can't work simultanuiosly wit WiFi)
+
+* Charge current senesor
+* Battery voltage
 
 ### RTC Clock
 
