@@ -41,7 +41,7 @@ Connected VIA NPN transitor. The N-channel mosfet could be used
 
 ### TP4056
 
-Depecting charging, charge done and charge current
+Detecting charging, charge done and charge current
 
 * PROG - GPIO4
 * CHRG - GPIO5
