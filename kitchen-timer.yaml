@@ -147,6 +147,7 @@ api:
 
 ota:
   password: !secret kitchen_timer.ota.password
+  platform: esphome
   on_begin:
     then:
       - switch.turn_off: power_saving
